@@ -68,7 +68,7 @@
 !   write(*,*)'3F back from get_state_var_value',value,' ',trim(encoded)
 1000 continue
 ! possible memory leak
-   write(*,*)'3F exit get_stable_state_var_value'
+!   write(*,*)'3F exit get_stable_state_var_value'
    nullify(svr)
    return
  end subroutine get_stable_state_var_value
@@ -134,6 +134,7 @@
             value=ceq%svfunres(lrot)
 !            write(*,*)'3F Extracting saved value for: ',trim(name),value
          else
+!            write(*,*)'3F call svaluate_svfun_old 1'
             value=evaluate_svfun_old(lrot,actual_arg,mode,ceq)
             if(gx%bmperr.eq.4217) goto 1000
          endif
@@ -174,6 +175,7 @@
 ! and the same column in that phase must be the same phase ...
 ! so I have to have the same number of phases from each equilibria.
 ! tentative added feature: # instead of * means also metastable phases
+! BEWHERE # is used also for composition set and sublattice index!
 !
 ! CURRENTLY if x(*,*) and x(*,A) mole fractions only in stable phases
 !
@@ -672,7 +674,8 @@
    character argument*60,arg1*24,arg2*24,ch1*1,lstate*60,propsym*60
    integer typty
    logical deblist
-!   write(*,*)'3F in decode "',trim(statevar),'" ',istv
+   istv=0
+!   write(*,*)'3F in decode3 "',trim(statevar),'" ',istv
 ! initiate svr internal variables
    deblist=.FALSE.
 !   deblist=.TRUE.
@@ -700,7 +703,7 @@
 ! -2 for species or constituent
 ! -3 for phase
 ! -4 for composition set
-! -10 for also metastable phases and composition sets
+! -10 for also metastable phases and composition sets, using hash #
    istv=-1
    indices=0
 ! iref=0 means user defined reference state
@@ -784,7 +787,10 @@
    svr%oldstv=istv; svr%statevarid=istv
    if(lstate(jp:jp).ne.'(') goto 1130
    kp=index(lstate,')')
-   if(kp.lt.jp) goto 1140
+   if(kp.lt.jp) then
+!      write(*,*)'3F cannot find )',trim(lstate),jp,kp
+      goto 1140
+   endif
    argument=lstate(jp+1:kp-1)
    kp=index(argument,',')
    if(kp.gt.0) then
@@ -920,6 +926,7 @@
       kp=index(lstate,')')
       if(kp.le.0) then
          if(deblist) write(*,110)'3F dsv 5: ',is,jp,kp,lstate(1:20)
+         write(*,110)'3F dsv 5: ',is,jp,kp,lstate(1:20)
 110      format(a,3i3,a)
          gx%bmperr=4103; goto 1000
       endif
@@ -1004,6 +1011,7 @@
 !            write(*,*)'3F findconst 2: ',trim(arg2),cmass,icc
             if(gx%bmperr.ne.0) goto 1000
          endif
+         svr%component=0
          svr%constituent=icc
          svr%argtyp=4
       else
@@ -1127,6 +1135,7 @@
    svr%phase=iph
    svr%compset=ics
 !----------------------------- unfinished ?????
+! typty>100 means a model-parameter-id with associated component such as MQ&FE
    if(typty.gt.100) then
 ! typty: third argument is constituent (or component??)
       istv=-typty/100
@@ -1790,7 +1799,7 @@
          call get_constituent_name(indices(1),indices(3),&
               stsymb(jp:),mass)
          if(gx%bmperr.ne.0) goto 1000
-!         write(*,*)'3F y:',indices,sublat
+!         write(*,*)'3F encode y:',indices,sublat
 ! sublattice is the last argument
          jp=len_trim(stsymb)+1
          if(sublat.gt.1) then
@@ -1800,6 +1809,7 @@
             stsymb(jp:jp)=')'
             jp=jp+1
          endif
+!         write(*,*)'3F encode: "',trim(stsymb),'"'
       elseif(kstv.ge.16 .and. kstv.le.19) then
 ! allow for percent or %
          if(iunit.eq.100) then
@@ -1871,6 +1881,7 @@
  subroutine findsublattice(iph,constix,sublat)
 ! find sublattice of constituent constix in phase lokph
 ! is lokph index to gtp_phaserecord or gtp_phase_varres??
+! constix is constituent index
    implicit none
    integer iph,constix,sublat
 !\end{verbatim}
@@ -1886,7 +1897,9 @@
       write(*,*)'3F no such constituent in this phase',constix
       gx%bmperr=4399; goto 1000
    endif
-   nn=1
+!   nn=1
+! BUG!! found 21.03.18 after 5 years !!
+   nn=0
    loop: do sublat=1,phlista(lokph)%noofsubl
       nn=nn+phlista(lokph)%nooffr(sublat)
       if(constix.le.nn) exit loop
@@ -2266,11 +2279,11 @@
          goto 500
       endif
 ! wrong or state variable not implemented
-      write(*,10)'3F not impl: ',istv,indices,iref,iunit,gx%bmperr,value
+      write(*,10)'3F not impl 1: ',istv,indices,iref,iunit,gx%bmperr,value
       goto 1100
    else
 ! wrong or state variable not implemented
-      write(*,10)'3F not impl: ',istv,indices,iref,iunit,gx%bmperr,value
+!      write(*,10)'3F not impl 2: ',istv,indices,iref,iunit,gx%bmperr,value
       goto 1100
    endif potentials
 ! normal return
@@ -3944,24 +3957,29 @@
 ! symbol not a state variable, may be another function
 !            write(*,*)'3F not state variable: ',gx%bmperr,' "',&
 !                 pfsym(js)(1:len_trim(pfsym(js))),'"'
-            gx%bmperr=0
             do ks=1,nsvfun
                if(pfsym(js).eq.svflista(ks)%name) then
 !                  write(*,*)'3F found another function: ',trim(pfsym(js))
                   iarr(1,js)=-ks
+                  gx%bmperr=0
                   goto 390
                endif
             enddo
-            write(*,*)'3F not a function: "',&
-                 pfsym(js)(1:len_trim(pfsym(js))),'"'
+! here it can be a model parameter id such as THET(BCC) or MQ&FE(BCC)
+            write(*,*)'3F argument not understood: "',&
+                 pfsym(js)(1:len_trim(pfsym(js))),'"',gx%bmperr
             gx%bmperr=4135; goto 1000
          else
-! This can be a parameter identifier like mobility: mq&fe(fcc)
-!            write(*,*)'3F decoded 1: ',trim(pfsym(js)),svr%oldstv
-!            write(*,*)'3F decoded 2: ',svr%statevarid
+! It is a state variable or a model parameter identifier
 ! to avoid confusing this with another function index subtract 1000
+!            write(*,*)'3F state variable or model parameter id: "',&
+!                 pfsym(js)(1:len_trim(pfsym(js))),'"',gx%bmperr
+!            write(*,'(a,10i5)')'3F svr: ',svr%oldstv,svr%norm,svr%unit,&
+!                 svr%phref,svr%argtyp,svr%phase,svr%compset,svr%component,&
+!                 svr%constituent
 ! Store in the old way in iarr
 !            iarr(1,js)=svr%oldstv-1000
+!            write(*,*)'3F state variable or model parameter id',svr%oldstv
             if(svr%oldstv.lt.0) then
                iarr(1,js)=svr%oldstv-1000
             else
@@ -4018,6 +4036,7 @@
 ! NOTE svfval should be set if only calculated when explicitly referenced
 ! possible memory leak
    nullify(svr)
+!   write(*,*)'3F exit enter_svfun'
    return
  end subroutine enter_svfun
 
@@ -4442,6 +4461,7 @@
 75 format('No  Name ',12x,'Value')
    do kf=1,nsvfun
 ! actual arguments needed if svflista(kf)%nactarg>0
+!      write(*,*)'3F call svaluate_svfun_old 2'
       val=evaluate_svfun_old(kf,actual_arg,0,ceq)
       if(gx%bmperr.ne.0) goto 1000
       if(kou.gt.0) write(kou,77)kf,svflista(kf)%name,val
@@ -4471,6 +4491,8 @@
    type(gtp_state_variable), target :: svr2
    type(gtp_state_variable), pointer :: svr
    integer jv,jt,istv,ieq
+! added to handle symbols that are model parameter id
+   integer indices(4),iref,iunit
    double precision value
    argval=zero
    value=zero
@@ -4512,10 +4534,23 @@
 ! evidently istv<1 can also mean this is a model parameter identifier
 ! how to know?  Here only when entering the symbol?
          if(istv.lt.-1000) then
-            write(*,*)'3F model parameter identifier *** ',1000-istv
-            write(*,*)'3F allocated: ',size(svflista(lrot)%formal_arguments)
-            write(*,*)'3F not implemented, value set to zero'
-            value=zero
+            ieq=-istv-1000
+!            write(*,*)'3F model parameter identifier: ',ieq
+!            write(*,*)'3F allocated: ',size(svflista(lrot)%formal_arguments)
+!            write(*,'(a,10i5)')'3F svflista: ',&
+!                 svflista(lrot)%formal_arguments(5,jt),&
+!                 svflista(lrot)%formal_arguments(6,jt),&
+!                 svflista(lrot)%formal_arguments(7,jt)
+! VERY VERY CLUMSY, must be changes to use svr state variable record
+! indices are PHASE, COMPSET, COMPONENT, 
+            indices(1)=svflista(lrot)%formal_arguments(5,jt)
+            indices(2)=svflista(lrot)%formal_arguments(6,jt)
+            indices(3)=svflista(lrot)%formal_arguments(7,jt)
+            indices(4)=0
+            iref=0
+            iunit=0
+            call state_variable_val3(-ieq,indices,iref,iunit,value,ceq)
+!            value=zero
          else
 ! if eqnoval nonzero it indicates from which equilibrium to get its value
             ieq=svflista(lrot)%eqnoval

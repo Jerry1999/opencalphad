@@ -19,18 +19,137 @@ answer such questions.
 
 In the list below the most recent changes come first.
 
+2021.04.25 OC version 6.030: It seems there are difficulties to
+calculate diagrams using mass fractions, w, or mass percent, w%.  No
+such problems uing mole fractions.  Until I have had time to look into
+this please use mole fractions in all calculations of diagrams.  For
+plotting it is possible to use mass fraction and percent.
+
+I have fixed that the axis conditions used during step/map are now
+restored after the step/map has finished.
+
+2021.04.25 OC version 6.029: A few corrections in the new magnetic
+model have been made, evidently the new magnetic model still uses the
+disordered paramagnetic state at high T as reference state except(!)
+corrected for the pure elements in the new unary database.  This may
+cause some non-zero or even negative entropies for alloys.
+
+I also changed the "model-parameter-id" VS to be VD because the "S" in
+VS can be misunderstood as the SER reference state suffix.  The
+restoring of conditions after STEP and MAP has also been removed as it
+caused problems.  I will check it it can be restored later.
+
+2021.04.15 OC version 6.028: In the Makefile for Linux I have changed
+to use X11 plot driver in GNUPLOT by default.  For MacOS the qt plot
+driver is the default and for Windows the wxt.  The user can change
+this interactivly also for each plot.
+
+The "model-parameter-identifier" for the Einstein T, hithero known
+as THET has changed to LNTH as it is the value of LN(theta) which
+is used.  The reason to use LN(theta) is that the composition dependence
+is better expressed using the logarithm.
+
+The Inden-Hillert-Qing-Xiong model for magnetism has been corrected
+according to the paper 2001 by Qing and Sundman.  It is now possible
+to include this magnetic model as well as the Einstein low T heat
+capacity model in TDB files.  Up to know it was only possible to enter
+these models interactively or from macro files.
+
+2021.04.07 OC version 6.027: Finally it is possible to enter symbols
+that include values of model parameter identifiers.  This may not be
+something everyone does every day and I had never tested it but
+sometimes it may be useful.  I have also fixed that one can use
+conditions on constituent fractions in phases with ionic constituent.
+I was surprised it was not already allowed but it is true I had never
+had any reason to test it.  A number of minor bugs fixed.
+
+I have had a look at TQlib and slightly updated the crfe example.
+Note that on Github there are several Python-OC libraries which may be
+simpler to use for those not familiar with Fortran.
+
+2021.04.02 OC version 6.026: Some new interest in the 3rd generation
+unaries, I have fixed some problems with the composition dependent
+THETA (the Einstein temperature) for the low T model.
+
+I have also added some new facilities for plotting results from
+isopleth calculations, previously one could not plot the phase
+compositions, only the composition on the lines separating phase
+regions in the plane of the calculation.  Evidently such diagrams
+(they are not phase diagrams!) can be useful in some cases.
+
+2021.03.25 OC version 6.025: User guide (prerelease version 7) and
+news-OC7 added.  User Guide and online help system slightly improved
+and help added for some new (sub)commands and questions.
+
+An attempt has been made to fix several spurious bugs in the plotting
+but as previously noted the step/map/plot routines are still very fragile.
+
+A bug handling expressions used as conditions, for example
+y(bcc,Al#2)-y(bcc,Al#3) used in macro map17 has been fixed.
+
+2021.03.14 OC version 6.024: Some minor improvement of the
+Scheil-Gulliver and paraequilibrium calculations and plotting made.
+
+2021.03.14 OC version 6.023: A very fragile facility to calculate and
+step paraequilibria has been implemented.  This time it was mainly the
+non-linear solver that caused problems, when eventually there was
+something to plot there were no extra problems.  Except to append a
+plotfile that already contained an appended file.  There is a new
+macro "step-epz" which calculates a stable isopleth for the Fe-Mn-Si-C
+system and then overlays that with a paraequilibrium section for
+bcc/fcc and overlays that with a tzero line between bcc/fcc.  It may
+be useful to understand transformations in low alloyes steel.  I am
+grateful to Bengt Hallstedt who provided a new free steel database,
+"iron4cd.TDB" intended for cast irons.
+
+The calculate/step NPLE will be put on the shelf for a while, in the
+macro testcond1 there is an example how to calculate a single NPLE
+equilibria which can be more intructive than just mechanically repeat
+set/calculate/step/plot.
+
+2021.03.07 OC version 6.022: Finally I have implemented some new STEP
+commands useful to simulate some limiting cases of phase transformations:
+
+- STEP TZERO to calculate a curve where to phases have the same Gibbs
+energy.  Such a curve can be taken as a limit of a diffusionless
+transformation.  
+
+- STEP SCHEIL_GULLIVER to calculate a solidification curve assuming no
+diffusion in the solid phases and a homogeneous liquid.
+
+One more step option will hopefully be implemented soon.
+
+- STEP NPLE to calculate a "No Partitioning Local Equilibrium" line
+which describe the limit of fast ferrite/austenite transformation in a
+steel, assuming that only carbon can diffuse and the ferrite inherits
+the alloy composition of the austenite.
+
+Neither of these simulations describe an equilibrium situation and
+must be used with care.  There are new macros, step-tzero and
+step-scheil explaining how to use tese commands.  As always please
+report problems.
+
+A main problem I have with the diagams is the plotting because I wrote
+most of the step-map-plot package some 5 years when I was learning the
+new Fortan and knew nothing about GNUPLOT.  Hopefully I will get time
+to rewrite the whole graphical interface sometime, as well as update
+documentation and help files.  Luckily Chunhui Luo is working hard to
+make OC more user friendly with the OC-CAE program.
+
 2021.02.26 OC version 6.021: An attempt has been made to improve
 mapping of phase diagram.  As a first step several startpoints are
 now allowed for a map calculation and in a second step automatic
 startpoints will be generated.  The phase diagram calculation is very
 sensitive to the start points and any manipulation of the code for
-mapping creates havoc in some diagrams.  The command to add a second
-or third start point is "SET AS_START" after calculating the
-equilibrium with a new set of conditions.  Additionally one can invoke
-a global minimizer at regular intervals during mapping with the
-command "SET ADVANCED MAP" followed by a number.  The global grid
-minimizer will check the equilibria along the calculated lines at
-regular intervals according to this number.
+mapping creates havoc in some diagrams.
+
+The command to add a second or third start point is "SET AS_START"
+after calculating the equilibrium with a new set of conditions.
+Additionally one can invoke a global minimizer at regular intervals
+during mapping with the command "SET ADVANCED MAP" followed by a
+number.  The global grid minimizer will check the equilibria along the
+calculated lines at regular intervals according to this number and may
+prevent metastable extrapolations.
 
 2021.01.27 OC version 6.020: On request from a user I have added a new
 list command, "LIST CSV-TABLE" which will generate a table with "Comma

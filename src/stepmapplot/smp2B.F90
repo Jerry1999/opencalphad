@@ -33,9 +33,7 @@
     type(map_node), pointer :: mapnode,invar,localtop
     type(map_line), pointer :: mapline
     logical wildcard,hashtag
-!    integer, parameter :: mofapl=100
     character ch1*1,gnuplotline*256,pfd*128,pfc*256
-!    character pfh*64,dummy*24,applines(mofapl)*128,appline*128
     character pfh*128,dummy*24
     double precision, dimension(:,:), allocatable :: anp
     double precision, dimension(:), allocatable :: xax,yyy
@@ -55,6 +53,9 @@
     integer i,ic,jj,k3,kk,kkk,lokcs,nnp,np,nrv,nv,nzp,ip,nstep,nnv,nofapl
     integer nr,line,next,seqx,nlinesep,ksep,iax,anpax,notanp,appfil,errall
     double precision xmax,xmin,ymax,ymin,value,anpmin,anpmax
+! used for Scheil
+    double precision npflval
+    logical scheilorder
 ! lhpos is last used position in lineheader
     integer giveup,nax,ikol,maxanp,lcolor,lhpos,repeat,anpdim,qp
     integer nix,stoichfix,invlines,invnode,nrett,mfix
@@ -62,6 +63,8 @@
 ! setting color on isopleth lines?  Dimension is max different fix phases
     integer, allocatable, dimension(:,:) :: phamfu
     integer fixphasecolor
+! trying to understand
+    integer ttunodeid,ttuheads,ttutoplines,ttuline,ttuplotline,haha
     character date*8,mdate*12,title*128,backslash*2,lineheader*1024
     character deftitle*128,labelkey*64
     logical overflow,first,last,novalues,selectph,varofun,moretops,isopleth
@@ -72,21 +75,18 @@
     type(graphics_textlabel), pointer :: textlabel
 ! line identification (title)
     character*16, dimension(:), allocatable :: lid
+!    character*32, dimension(:), allocatable :: lid
 !
 !    write(*,*)'In ocplot2 graphopt%status: ',maptop%status,MAPINVARIANT
-!    if(btest(maptop%mapinvariant) &
-!         graphopt%status=ibset(graphopt%status,GRISOPLETH)
-!    write(*,*)'smp2b isoplethplot 0: ',btest(graphopt%status,GRISOPLETH)
 ! transfer from graphics record to local variables
 ! initiate lines_excluded
     lines_excluded=0
+    scheilorder=.FALSE.
 ! create the terminal plot_line record
     allocate(lastplotline)
     nullify(lastplotline%nextline)
     lastplotline%type=-1
     plotline1=>lastplotline
-    isopleth=btest(graphopt%status,GRISOPLETH)
-    if(isopleth) write(*,*)'smp2b plotting isoplteh'
 ! when creating a new plotline: ??
 ! 1: allocate(plotline%nextline)
 ! 2: plotline%nextline%nextline=>plotline1
@@ -94,20 +94,27 @@
 ! transfer from graphics record to local variables
     pltax(1)=graphopt%pltax(1)
     pltax(2)=graphopt%pltax(2)
+    isopleth=btest(graphopt%status,GRISOPLETH)
+!    write(*,*)'ocplot2 wildcard: ',trim(pltax(1)),' & ',trim(pltax(2))
+!    if(index(pltax(1),'*').gt.0 .or. index(pltax(2),'*').gt.0) then
+! fixed in PMON6
+! allow plotting phase compositions also for isopleths ...
+!       isopleth=.FALSE.
+!    endif
+    if(isopleth) write(*,*)'smp2b plotting isopleth'
     filename=graphopt%filename
     funsym=' '
 ! for isopleths this value determine the line color
     fixphasecolor=1
-
-!    write(*,*)'In ocplot2: ',trim(filename)
-!    pform=graphopt%pform
-! continue as before ...
+! If wildcard on two axis use ocplot3 to extract data (tie-lines in plane)
     if(index(pltax(1),'*').gt.0 .and. index(pltax(2),'*').gt.0) then
 !       write(*,*)'Using ocplot3'
        call ocplot3(ndx,pltax,filename,maptop,axarr,graphopt,&
             version,ceq)
        goto 1000
     endif
+! for tzero lines there is no meqrec record, meqrec%phr not allocated
+!    write(*,*)'In ocplot2: ',maptop%lines,allocated(maptop%linehead)
     moretops=.FALSE.
     seqx=0
     call date_and_time(date)
@@ -190,19 +197,39 @@
     selectph=.FALSE.
     hashtag=.FALSE.
     selphase=' '
+    graphopt%specialdiagram=0
+    if(maptop%type_of_node.eq.3) then
+! this change the order of plotting the lines, maybe needed only for PFL/PFS ??
+       scheilorder=.TRUE.
+    endif
     do iax=1,2
 !       write(*,*)'Allocating for axis: ',iax
        call capson(pltax(iax))
+       if(pltax(iax)(1:4).eq.'PFL ' .or. pltax(iax)(1:4).eq.'PFS ') then
+          if(maptop%type_of_node.eq.3) then
+! this is a function only used for plotting phase fraction liquid or solids
+! in Scheil simulations.
+             npflval=one
+! this indicates to ocplot2B that one must use plot "-" ...etc
+! to have different colors and labels on different lines
+!             write(*,*)'ocplot2: Setting graphopt%specialdiagram=2'
+             graphopt%specialdiagram=2
+          else
+             write(*,*)'Plot axis PFL/PFS are reserved for Scheil simulations'
+             gx%bmperr=4399; goto 1000
+          endif
+       endif
 !       wildcard1: if(index(pltax(iax),'*').gt.0) then
        wildcard1: if(index(pltax(iax),'*').gt.0 .or. &
-            index(pltax(iax),'#').gt.0) then
+            index(pltax(iax),'(#)').gt.0) then
+! searching for (#) avoids problem when # is used for comp. sets or sublattatice
           i=index(pltax(iax),'#')
           if(i.gt.0 .and.&
                (pltax(iax)(i+1:i+1).eq.')'.or.pltax(iax)(i+1:i+1).eq.',')) then
 ! this means the phase name is #, indicating all phases including dormant
 ! Note that # is used to indicate composition sets, thus ignore #2 etc
              hashtag=.TRUE.
-             write(*,*)'SMP2B hastag set true',trim(pltax(iax)),i
+!             write(*,*)'SMP2B hastag set true',trim(pltax(iax)),i
           endif
           if(wildcard) then
              write(*,*)'in OCPLOT2 one axis variable with wildcard allowed'
@@ -287,10 +314,10 @@
 ! come back here if there is another localtop in plotlink!
 77  continue
 ! change all "done" marks in mapnodes to zero
-!    write(*,*)'SMP at label 77A: ',localtop%lines
+!    write(*,*)'SMP2B ocplot2 at label 77A: ',localtop%lines
     ikol=0
     do nrv=1,localtop%lines
-       localtop%linehead(nrv)%done=0
+       if(allocated(localtop%linehead)) localtop%linehead(nrv)%done=0
     enddo
 ! we sometimes have a segmentation fault when several maptops ...
     if(associated(localtop%next)) then
@@ -304,7 +331,7 @@
        write(*,*)'Mapnode next link missing 1'
        goto 79
     endif
-!    write(*,*)'SMP at label 77B: ',localtop%lines
+!    write(*,*)'SMP2B ocplot2 at label 77B: ',localtop%lines
     thisloop: do while(.not.associated(mapnode,localtop))
        do nrv=1,mapnode%lines
           mapnode%linehead(nrv)%done=0
@@ -317,19 +344,35 @@
     enddo thisloop
 !-----------
 79  continue
+    if(.not.associated(localtop%saveceq)) then
+       write(*,*)'Plot data structure has no results to plot'
+       gx%bmperr=4399; goto 1000
+    endif
     results=>localtop%saveceq
     mapnode=>localtop
     line=1
 ! looking for segmentation fault running map11.OCM as part of all.OCM in oc4P
 ! This error may be due to having created (or not created) composition sets ...
-!    write(*,*)'ocplot2 after label 79'
+!    write(*,*)'SMP2B ocplot2 after label 79'
 ! extract the names of stable phases for this lone
 
 !    write(*,*)'mapnode index: ',mapnode%seqx
 !    write(*,*)'Before label 100: ',results%free
 !------------------------------------------- begin loop 100
+! loop back here from ??
 100    continue
+!       write(*,*)'SMP2B ocplot2 at label 100',localtop%seqx,line,&
+!            size(localtop%linehead)
        mapline=>localtop%linehead(line)
+! TRYING TO UNDERSTAND WHAT IS HAPPENING HERE ....
+       ttunodeid=localtop%seqx
+       ttuheads=size(localtop%linehead)
+       ttutoplines=localtop%lines
+       ttuline=line
+       ttuplotline=nv
+!       write(*,101)'At 100',ttunodeid,ttuheads,ttutoplines,ttuline,ttuplotline
+101    format('Line selected: ',a,': nodeid ',i3,', heads/lines: ',2i2,&
+            ' index: ',i2,', plotline: ',2i4)
 ! initiate novalues to false for each line
        novalues=.false.
 ! skip first point if dot derivative
@@ -348,17 +391,35 @@
              goto 500
           endif
        endif
+! We jump here from where?? ... several places
 110    continue
 ! mark line is plotted
 !       write(*,*)'Values from mapline ',mapline%lineid
-! loop for all calculated equilibra, phases and composition sets
+! loop for all calculated equilibria, phases and composition sets
 !       write(*,*)'Before label 150: ',mapline%lineid
 !150    continue
        nr=mapline%first
        if(mapline%done.ne.0) goto 220
        mapline%done=-1
-       if(ocv()) write(*,*)'Plotting line: ',&
-            mapline%lineid,mapline%number_of_equilibria,mapline%termerr
+!       if(ocv()) write(*,*)'Plotting line: ',&
+!       write(*,*)'Plotting line: ',&
+!            mapline%lineid,mapline%number_of_equilibria,mapline%termerr
+!--------------
+       ttunodeid=localtop%seqx
+       ttuheads=size(localtop%linehead)
+       ttutoplines=localtop%lines
+       ttuline=line
+       ttuplotline=nv
+!       write(*,101)'at 110',ttunodeid,ttuheads,ttutoplines,ttuline,&
+!            ttuplotline
+!--------------
+       if(mapline%lineid.le.0) then
+          write(*,*)'Skipping line with id less or equal to zero'
+          goto 500
+       elseif(mapline%number_of_equilibria.le.0) then
+!          write(*,*)'Skipping line with no equilibria.'
+          goto 500
+       endif
        first=.TRUE.
 ! last set true when we reach the last equilibrium on the line
        last=.FALSE.
@@ -376,7 +437,9 @@
 ! skip this equilibrium!!
              nr=0
              write(*,*)'Skipping last point of a line in the plot'
-             cycle plot1
+! same as cycle plot1 but maybe safer??
+             goto 220
+!             cycle plot1
           endif
           nv=nv+1
           if(nv.ge.maxval) then
@@ -454,6 +517,9 @@
                    endif stableph1
                 enddo
              enddo phloop
+! finding place to change color of line in Scheil simulations
+!             write(*,'(a,i3,2x,a)')'ocplot2 extract stable phases ',&
+!                  nlinesep,trim(phaseline(nlinesep))
 !             do kkk=1,nlinesep
 !                write(*,'(a,i3,3i5)')'smp2b color: ',nlinesep,&
 !                     kkk,phamfu(1,kkk),phamfu(2,kkk)
@@ -477,16 +543,24 @@
 !             skipdotder=.FALSE.; special_circumstances=1
              special_circumstances=1
           endif
-          call meq_get_state_varorfun_value(statevar,value,encoded1,curceq)
+          if(statevar(1:4).eq.'PFL ' .or. statevar(1:4).eq.'PFS ') then
+             call meq_get_state_varorfun_value('NPM(LIQUID) ',&
+                  value,encoded1,curceq)
+             value=npflval*value
+             npflval=value
+             if(statevar(1:4).eq.'PFS ') value=one-value
+          else
+             call meq_get_state_varorfun_value(statevar,value,encoded1,curceq)
 !          write(*,*)'SMP axis variable 1: ',trim(encoded1),value
-          if(gx%bmperr.ne.0) then
+             if(gx%bmperr.ne.0) then
 ! this error should not prevent plotting the other points FIRST SKIPPING
-             write(*,212)'SMP skipping a point 1, error evaluating: ',&
-                  statevar(1:10),curceq%tpval(1),nv,nr
-212          format(a,a,f10.2,2i5)
+                write(*,212)'SMP skipping a point 1, error evaluating: ',&
+                     statevar(1:10),curceq%tpval(1),nv,nr
+212             format(a,a,f10.2,2i5)
 ! buperr resets putfun error 
-             gx%bmperr=0; buperr=0
-             nv=nv-1; goto 215
+                gx%bmperr=0; buperr=0
+                nv=nv-1; goto 215
+             endif
           endif
           xax(nv)=value
 !          write(*,201)'at 202: ',nr,nv,curceq%tpval(1),value
@@ -518,6 +592,7 @@
 ! probably because new composition set created
 !                write(*,*)'SMP2B get_many ',trim(statevar),nzp,selectph,hashtag
 ! nzp is dimentsion of yyy, np is number of values
+!                write(*,*)'SMP2B calling get_many_svar: ',trim(statevar)
                 call get_many_svar(statevar,yyy,nzp,np,encoded2,curceq)
 !                write(*,*)'In ocplot2, segmentation fault search: '
                 if(gx%bmperr.ne.0) then
@@ -689,15 +764,27 @@
 !                write(*,*)'smp2B skipping point B: ',trim(statevar),nv
                 skipdotder=.FALSE.; special_circumstances=1
              endif
-             call meq_get_state_varorfun_value(statevar,value,encoded1,curceq)
+! special Scheil simulation 
+             if(statevar(1:4).eq.'PFL ' .or. statevar(1:4).eq.'PFS ') then
+                call meq_get_state_varorfun_value('NPM(LIQUID) ',&
+                     value,encoded1,curceq)
+                value=npflval*value
+                npflval=value
+                if(statevar(1:4).eq.'PFS ') value=one-value
+                encoded1=statevar
+             else
+! end special Scheil, evaluate function normally
+                call meq_get_state_varorfun_value(statevar,value,&
+                     encoded1,curceq)
 ! encoded1 here is wrong?? not Cp when it should be, also when no error
 !             write(*,*)'SMP axis value 7: ',trim(encoded1),value
-             if(gx%bmperr.ne.0) then
+                if(gx%bmperr.ne.0) then
 ! SECOND Skipping
-                if(gx%bmperr.ne.4373) &
-                     write(*,212)'SMP Skipping a point 2, error evaluating: ',&
-                     statevar(1:10),curceq%tpval(1),nv,nr
-                nv=nv-1; goto 215
+                   if(gx%bmperr.ne.4373) &
+                       write(*,212)'SMP Skipping a point 2,error evaluating: ',&
+                        statevar(1:10),curceq%tpval(1),nv,nr
+                   nv=nv-1; goto 215
+                endif
              endif
 ! save to use in lid if not allocated
              funsym=encoded1
@@ -882,9 +969,10 @@
 ! jump here if no wildcard
 225       continue
        endif invariant_lines
+!       
        if(invnode.ne.0) then
-!          write(*,'(a,3i4,2(1pe12.4))')'Invariant isopleth node: ',invnode,&
-!               ninv,nrett,xax(nrett),anp(1,nrett)
+!          write(*,'(a,3i4,2(1pe12.4))')'ocplot2 Invariant isopleth node: ',&
+!               invnode,ninv,nrett,xax(nrett),anp(1,nrett)
           if(ninv.eq.0) then
 ! the first invariant isopleth 
              ninv=ninv+1
@@ -913,6 +1001,7 @@
           endif
        endif
 !---- take next node along the same line
+! Then jump back to label 100 and plot other lines ... a bit stupid ...
 230    continue
 !       write(*,*)'SMP2B at 230: nr and nv: ',nr,nv
        kk=seqx
@@ -922,7 +1011,8 @@
           seqx=0
        endif
 240    continue
-!       write(*,*)'Next node: ',seqx
+!       write(*,'(a,5i5,l2)')'ocplot2 next node: ',seqx,nlinesep,&
+!            linesep(nlinesep),nv,line,scheilorder
        if(seqx.eq.0) then
           if(nlinesep.gt.0) then
              if(linesep(nlinesep).lt.nv) then
@@ -932,8 +1022,25 @@
 !                write(*,*)'adding empty line 2',nlinesep,linesep(nlinesep)
              endif
           endif
-          if(line.eq.2) goto 500
+! Hm, this was not designed for multicomponent isopleths ....
+          if(line.eq.2) then
+!             write(*,*)'ocplot2 jump to label 500',line
+             goto 500
+          endif
+          if(scheilorder) then
+! The mapnodes must be followed in numeric order
+! ane they have just one line each.
+              line=1
+!             write(*,*)'SMP2B scheilorder',localtop%seqx,&
+!                  localtop%next%seqx,localtop%previous%seqx
+             localtop=>localtop%previous
+             mapline=>localtop%linehead(1)
+!             write(*,*)'ocplot2 newline ',nlinesep,linesep(nlinesep)
+             goto 110
+          endif
           line=2
+! jump back to label 100 for next line
+!          write(*,*)'ocplot2 jump to label 100 for line 2'
           goto 100
        else
           if(kk.eq.seqx) then
@@ -950,28 +1057,36 @@
              invnode=size(mapnode%linehead)
 !             write(*,*)'ocplot2 invariant node 2',invnode
           endif
-!          write(*,*)'In ocplot2, looking for segmentation fault 4M'
 ! loop through all mapnodes
 250       continue
-          if(mapnode%seqx.eq.seqx) then
+!          write(*,*)'ocplot2, at label 250: ',mapnode%seqx,seqx
+!          if(mapnode%seqx.eq.seqx) then
+! If just for STEP then check number of axis for calculation
+          if(graphopt%noofcalcax.eq.1 .and. mapnode%seqx.eq.seqx) then
 ! >>> this is just for step, for map one must find line connected
-             mapline=>mapnode%linehead(1)
-! skip line if EXCLUDEDLINE set
-             if(.not.btest(mapline%status,EXCLUDEDLINE)) then
-                if(mapline%done.eq.0) goto 110
-             else
-                lines_excluded=lines_excluded+1
-!                write(*,*)'Skipping a line 2'
-             endif
-!             if(mapline%done.eq.0) goto 110
+             do haha=1,size(mapnode%linehead)
+                mapline=>mapnode%linehead(haha)
+                if(mapline%done.eq.0) then
+                   if(.not.btest(mapline%status,EXCLUDEDLINE)) then
+!                      write(*,*)'ocplot2 jump to label 110',&
+!                           seqx,mapline%number_of_equilibria
+                      goto 110
+                   else
+                      lines_excluded=lines_excluded+1
+                   endif
+                endif
+             enddo
           endif
+!          write(*,*)'ocplot2 associated?  ',associated(mapnode,localtop),&
+!               mapnode%seqx,seqx
           if(.not.associated(mapnode,localtop)) then
              mapnode=>mapnode%next
              invnode=0
              if(btest(mapnode%status,MAPINVARIANT)) then
                 invnode=size(mapnode%linehead)
-! All invariant nodes have the same number of stable phases !!
-!                write(*,*)'ocplot2 invariant node 3',invnode
+! Does all invariant nodes have the same number of stable phases YES!
+! But they can have different number of line exits
+!                write(*,*)'ocplot2 invariant node 3',invnode,mapnode%seqx
              endif
              goto 250
           else
@@ -984,15 +1099,20 @@
 !------------------------------------------- end loop 100
 ! check if we can find any lines not starting from localtop to be plotted
 500    continue
-!       write(*,*)'Checking for unplotted lines'
+!       write(*,*)'ocplot2 at 500 ',seqx
 !       write(*,*)'In ocplot2, looking for segmentation fault 5'
-       mapnode=>localtop%next
+!       mapnode=>localtop%next
+! when we have several plots localtop is the important one!!
+       mapnode=>localtop
        invnode=0
        if(btest(mapnode%status,MAPINVARIANT)) then
           invnode=size(mapnode%linehead)
+!          if(invnode.ne.mapnode%lines) write(*,*)'SMP2B check invnodes 1!'
 !          write(*,*)'ocplot2 invariant node 4',invnode
        endif
-       do while(.not.associated(mapnode,localtop))
+! Check for unplotted lines
+       anymoretoplot: do while(.TRUE.)
+!          write(*,*)'>>>>>Checking unplotted lines at node: ',mapnode%seqx
           jjline: do jj=1,mapnode%lines
              if(mapnode%linehead(jj)%done.eq.0) then
                 if(ocv()) write(*,*)'Found a line in node: ',mapnode%seqx,jj
@@ -1006,31 +1126,32 @@
                    endif
                 endif
                 mapline=>mapnode%linehead(line)
-!                goto 110
 ! skip line if EXCLUDEDLINE set
                 if(btest(mapline%status,EXCLUDEDLINE)) then
-!                   write(*,*)'Skipping a line 1'
-!                   mapnode%linehead(line)%done=0
                    cycle jjline
-                else
-                   goto 110
                 endif
+!                write(*,*)'SMP2B jump to 110 for line ',jj,&
+!                     ' in mapnode ',mapnode%seqx
+! %done=-1 means already plotted ...
+!                mapnode%linehead(jj)%done=-1
+                goto 110
              endif
           enddo jjline
           mapnode=>mapnode%next
           invnode=0
           if(btest(mapnode%status,MAPINVARIANT)) then
              invnode=size(mapnode%linehead)
+!             if(invnode.ne.mapnode%lines) write(*,*)'SMP2B check invnodes 2!'
 !             write(*,*)'ocplot2 invariant node 5',invnode
           endif
-!          write(*,*)'Looking at node: ',mapnode%seqx
-       enddo
+          if(associated(mapnode,localtop)) exit anymoretoplot
+       enddo anymoretoplot
 !--------------------------------------------
 ! end extracting data
 600    continue
        overflow=.FALSE.
 ! but we may have another maptop !!
-       if(associated(localtop%plotlink)) then
+       if(associated(localtop%plotlink) .and. .not.scheilorder) then
           if(.not.moretops) then
              write(*,*)'More than one maptop record'
              moretops=.true.
@@ -1142,43 +1263,44 @@
     endif
 !------------------------------------------------------------
     if(.not.allocated(lid)) then
+! lid is "LineIdenifier and changes color for each line with different meaning
 !       if(np.ge.1) then
 ! lid should always be allocated if np>1, but ... one never knows 
-!       write(*,*)'SMP: allocate lid 4: ',np
+!       write(*,*)'ocplot2 allocate lid 4: ',np,nlinesep
+!       if(scheilorder) then
+! for Scheil simulations phaseline(1..nlinesep) are phase names
+!          allocate(lid(nlinesep-1),stat=errall)
+!          do i=1,nlinesep-1
+!             jj=len_trim(phaseline(i))
+!             if(jj.le.32) then
+!                lid(i)=phaseline(i)
+!             else
+! Too long list, replace the middle by ...
+!                lid(i)=phaseline(i)(1:22)//'...'//phaseline(i)(jj-6:jj)
+!             endif
+!             write(*,*)'ocplot2 phaseline: ',trim(lid(i))
+!          enddo
+! Wow, set np=nlinesep-1 to have separate colors of Scheil lines
+!          write(*,*)'ocplot2 change np to nphaseline: '
+!          np=nlinesep-1
+!       else
 ! normally np=1 if we come here, plotting a single value
+!          write(*,*)'Allocating lid: ',trim(encoded1),':',trim(funsym),np
        allocate(lid(np),stat=errall)
        if(errall.ne.0) then
           write(*,*)'SMP2B Allocation error 11: ',errall
           gx%bmperr=4370; goto 1000
        endif
-!       write(*,*)'Allocating lid: ',trim(encoded1),trim(funsym),np
        do i=1,np
-!          lid(i)='appended '
           lid(i)=funsym
        enddo
     endif
+!    endif
 !------------------------------------------------------------
-!    write(*,*)'We are here removing _ ',np
-! replace _ by - in lid
-!    do i=1,np
-! lid may contain phase names with _
-! replace _ by - in lid because _ is interpreted as subscript (as LaTeX)
-798    continue
-!       write(*,*)'lid: ',i,': ',trim(lid(i))
-!       nv=index(lid(i),'_')
-!       if(nv.gt.0) then
-!          lid(i)(nv:nv)='-'
-!          goto 798
-!       endif
-!    enddo
-! move data output to the end of PLT file ...
-!    write(*,*)'smp2B ocplot2 We jump to 2000'    
-!    goto 2000
 2000 continue
 !    write(*,*)'We are at 2000 '
 !----------------------------------------------------------------------
 !
-!    write(*,*)'smp2b isoplethplot 1: ',btest(graphopt%status,GRISOPLETH)
     call get_plot_conditions(encoded1,maptop%number_ofaxis,axarr,ceq)
 !
 ! option to create a CSV table
@@ -1241,12 +1363,18 @@
 !\end{verbatim}
 !----------------------------------------------------------------------
 ! internal
-    integer ii,jj,kk,lcolor,appfil,nnv,ic,repeat,ksep,nv,k3,kkk,nofapl
+    integer ii,jj,kk,lcolor,appfil,nnv,ic,repeat,ksep,nv,k3,kkk,nofapl,iz
     integer, parameter :: mofapl=100
+    integer, parameter :: maxmultiplotlines=100
 ! ltf1 is a LineTypeoFfset for current plot when appending a plot, 0 default
 ! linewp is plotting with points along the line
     integer appfiletyp,lz,ltf1,linewp
-    character pfc*128,pfh*128,backslash*2,appline*128
+! appending an multiplot in ocplot2B
+    integer multibuffline
+    character multibuffer(maxmultiplotlines)*128
+    logical appendmultiplot
+! other things ...
+    character pfc*128,pfh*128,backslash*2,appline*128,inline*8,colord*5
     character applines(mofapl)*128,gnuplotline*256,labelkey*64,rotate*16
     character labelfont*32,linespoints*12,tablename*16,year*16,hour*16
     logical isoplethplot
@@ -1256,7 +1384,17 @@
 !         (linesep(kk),kk=1,nlinesep)
 !    write(*,*)'smp2b isoplethplot 2: ',btest(graphopt%status,GRISOPLETH)
 10  format(a,4i5,a/(15i4))
-!    write(*,*)'In ocplot2B filename: ',trim(filename)
+! graphopt%specialdiagram=2 is a Scheil plot phase amount/vs T
+!    if(graphopt%specialdiagram.eq.2) then
+!       write(*,*)'In ocplot2B scheil: ',graphopt%specialdiagram
+! just check all is OK
+!       do kk=1,nlinesep-1
+!          write(*,*)'phaseline: ',kk,': ',trim(phaseline(kk))
+!       enddo
+!    endif
+    multibuffline=0
+    nofapl=0
+    appendmultiplot=.FALSE.
     ltf1=0
     if(graphopt%appendfile(1:1).ne.' ') ltf1=10
     if(index(filename,'.plt ').le.0) then 
@@ -1268,9 +1406,7 @@
        kk=index(pfc,'.')-1
        kkk=len_trim(filename)+1
     endif
-!    write(*,*)'In OCPLOT2B opening ',trim(pfc)
     open(21,file=pfc,access='sequential',status='unknown')
-!    write(*,*)'In OCPLOT2B after opening ',trim(pfc)
     write(21,1600)trim(title)
 1600 format('# GNUPLOT file generated by OpenCalphad'/'# ',a)
 ! if there is just one curve do not write any key.  May be overriiden later ..
@@ -1307,8 +1443,10 @@
 ! dark-yellow: #C8C800, royal-blue: #4169E1, steel-blue #306080,
 ! gray: #C0C0C0, cyan: #00FFFF, orchid4: #804080, chartreuse: 7CFF40
 ! if just one line set key off for that line.
-    if(npx.eq.1 .and. graphopt%appendfile(1:1).eq.' ') then
-!    if(np.eq.1 .and. graphopt%appendfile(1:1).eq.' ') then
+    if(graphopt%specialdiagram.eq.2) then
+! for Scheil
+       labelkey=' on font "Arial,12" '
+    elseif(npx.eq.1 .and. graphopt%appendfile(1:1).eq.' ') then
        labelkey=' off'
     else
        labelkey=graphopt%labelkey
@@ -1388,12 +1526,13 @@
           '# set label "text" at 0.5, 0.5 rotate by 60 font "arial,12"'/&
           '# set xrange [0.5 : 0.7] '/&
           '# Adding manually a line and keep scaling:'/&
+          '# set arrow x0, y0 to x1,y1 nohead linestyle 1'/&
           '# set multiplot'/&
           '# set xrange [] writeback'/&
           '#  ... plot someting'/&
           '# set xrange restore'/&
           '#  ... plot more using same axis scaling '/&
-          '# set nomultiplot'/)
+          '# unset multiplot'/)
 !
     if(graphopt%rangedefaults(1).ne.0) then
 ! user defined ranges for x axis
@@ -1446,7 +1585,7 @@
 !---------------------------------------------------------------
 ! handle appended files here ....
 !
-    appfil1: if(graphopt%appendfile(1:1).eq.' ') then
+    appfildata: if(graphopt%appendfile(1:1).eq.' ') then
        appfil=0
     else
        appfil=23
@@ -1454,7 +1593,8 @@
        open(appfil,file=graphopt%appendfile,status='old',&
             access='sequential',err=1750)
 !
-       write(21,1720)'# APPENDED from '//trim(graphopt%appendfile)
+       write(21,1719)trim(graphopt%appendfile)
+1719   format(//78('#')/'# APPENDED from ',a)
 ! copy all lines up to "plot" to new graphics file
        nnv=0
 1710   continue
@@ -1464,6 +1604,40 @@
        if(appline(1:10).eq.'# GIBBSTRI') then
           write(*,*)'Warning: appended file is in Gibbstriangle format,',&
                ' plot will be strange!'
+          goto 1710
+       endif
+! save lines between "set multiplot" and "unset multiplot" to a buffer
+! appending a file which contains an already appended part
+! copy all lines to a buffer
+       if(appline(1:14).eq.'set multiplot ') then
+!          write(*,*)'ocplot2B Found multiplot in appended file'
+          if(multibuffline.gt.0) then
+             write(*,*)'smp2B appending twice, will probably fail',multibuffline
+          else
+             multibuffline=1
+!             write(*,*)'ocplot2B appending a "set multiplot"'
+          endif
+          appendmultiplot=.TRUE.
+          goto 1710
+       endif
+       if(appline(1:16).eq.'unset multiplot ') then
+!          write(*,*)'ocplot2B found "unset multiplot", saved ',&
+!               multibuffline,' lines'
+          appendmultiplot=.FALSE.
+!          do iz=1,multibuffline-1
+!             write(*,*)'ocplot2B: 'trim(multibuffer(iz))
+!          enddo
+! pause mouse ??
+          exit appfildata
+!          goto 1710
+       endif
+       if(appendmultiplot) then
+          if(multibuffline.gt.maxmultiplotlines) then
+             write(*,*)'Too many appendbuffer lines',multibuffline
+          else
+             multibuffer(multibuffline)=appline
+             multibuffline=multibuffline+1
+          endif
           goto 1710
        endif
 !------------------------------------------------------------------
@@ -1517,7 +1691,7 @@
           endif
        endif
 ! we have now found the plot command in the append file. There can be more
-!       write(*,*)'SMP appfiletyp: ',appfiletyp
+       write(*,*)'SMP appfiletyp: ',appfiletyp
 ! here we save the actual plot commands from the appendfile!!
        applines(1)=appline
 !       write(*,*)'SMP appline1: ',trim(applines(1))
@@ -1526,8 +1700,8 @@
 ! if line ends with \ then read more
        ii=len_trim(appline)
 ! write(*,*)'There are more? ',appline(i:ii),ii,ic
-!       if(appline(ii:ii).eq.'\') then
-       if(appline(ii:ii).eq.' ') then
+       if(appline(ii:ii).eq.'\') then
+!       if(appline(ii:ii).eq.' ') then
 ! continuation lines !! NOTE EACH plot expected at the beginning of the line
           read(appfil,1720,end=1750)appline
           ic=ic+1
@@ -1538,8 +1712,10 @@
           endif
           goto 1730
        endif
-! debug output of saved plot command
        nofapl=ic
+       write(*,*)'Read applines header lines: ',nofapl
+! debug output of saved plot command
+!       nofapl=ic
 !          write(*,*)(trim(applines(jj)),jj=1,nofapl)
 !          write(*,*)'appline: ',trim(appline),ic
 !          close(appfil)
@@ -1552,11 +1728,13 @@
        goto 1710
 ! error oppening append file
 1750   continue
+       write(21,1719)'# end of append',multibuffline
+!       write(*,1719)' end of append',multibuffline
        write(kou,*)'Error opening or reading the append file, skipping it'
        close(appfil)
        appfil=0
 1770   continue
-    endif appfil1
+    endif appfildata
 ! end of appendfile special
 !-----------------------------------------------
 ! text in lower left corner
@@ -1581,6 +1759,58 @@
        scalem=graphopt%scalefact(1)
        scale1=graphopt%scalefact(2)
     endif
+    if(graphopt%specialdiagram.eq.2) then
+!============================================== start Scheil
+! Handle Scheil diagram with color changes along a single line
+! ONLY if one axis is PFL or PFS!!! NOT if one plot composition of a phase
+!       write(*,*)'ocplot2B special for Scheil with PFL or PFS',nlinesep
+! if there is an appended file we must set multiplot here ...
+       if(appfil.gt.0) then
+          write(*,*)'ocplot2B adding set multiplot'
+          write(21,3828)
+       endif
+       backslash=',\'
+       inline='plot "-"'
+! All lines to plot, colord can be 2:3 or 3:2 depending what is on the axis
+          colord=' 2:3 '
+! no need to change, evidently xax and anp are already shifted ... suck
+!       write(*,'(a,a,2F12.6)')'ocplot2B colord: ',colord,xax(1),anp(1,1)
+       do kk=1,nlinesep-1
+          call replace_uwh(phaseline(kk))
+          write(21,2000)inline,colord,kk,trim(phaseline(kk)),backslash
+2000      format(a,' using 'a,' with lines ls ',i2,' title "',a,'"',a)
+          inline='""'
+          if(kk.eq.nlinesep-2) backslash=' '
+       enddo
+! Then all data with an empty line and a line with a single  "e"       
+! between each line.
+! nlinesep is number of separate lines to plot (with different sets of phases)
+! linesep(1..nlinesep) is number of lines of data for each line to plot
+! nrv is total lines with lines with data to write
+!       write(*,*)'ocplot2B linesep: ',(linesep(jj),jj=1,nlinesep)
+       write(21,'(a)')'# Line   1, phases: '//trim(phaseline(1))
+       jj=2
+       ltw: do nv=1,nrv
+!          write(*,'(3i4,1pe12.4)')'ocgnu2B data: ',jj,nv,linesep(jj),xax(nv)
+          if(nv.eq.linesep(jj)) then
+! a new line start
+             if(jj.eq.nlinesep) exit ltw
+             write(21,'(i4,2F12.6)')nv,xax(nv),anp(1,nv)
+             write(21,2100)jj,trim(phaseline(jj))
+2100         format(/'e'/'# Line ',i3,' phases ',a)
+             jj=jj+1
+          endif
+          write(21,'(i4,2F12.6)')nv,xax(nv),anp(1,nv)
+       enddo ltw
+       write(21,2110)
+2110   format(/'e'/)
+!2110   format(/'e'/'pause mouse')
+!       close(21)
+! Finished writing plot file
+!       stop 'test'
+       goto 4000
+!============================================== end Scheil
+    endif
 ! now write all data once as a table ended with EOD
     write(21,3000)nrv,trim(tablename)
 3000 format(//'# begin of data with lines',i7/'$',a,' << EOD')
@@ -1593,6 +1823,10 @@
 ! remove _ in keys
        call replace_uwh(lid(jj))
     enddo
+    if(graphopt%tielines.gt.0) then
+       write(*,*)'ocplot2 does not plot tielines,',&
+            ' they are perpendicular to the potential axis'
+    endif
 ! Plot grid?
     if(graphopt%setgrid.eq.1) write(21,777)
 777 format('set grid')
@@ -1674,10 +1908,13 @@
           ksep=min(ksep+1,nlinesep)
        endif
     enddo
-    write(21,'(a)')'EOD'
+    write(21,3823)
+3823 format('EOD'//)
     if(appfil.gt.0) then
 ! if there is an appendfile add set multiplot
+       write(*,*)'ocpolt2B trying to include appfile ...'
 ! The "writeback" is important for uniform scaling of multiplots
+! NOTE this is also used for Scheil above
        write(21,3828)
 3828   format('set multiplot'/&
             'set xrange [] writeback'/'set yrange [] writeback')
@@ -1714,8 +1951,13 @@
        endif
     endif
 !    write(*,*)'SMP2 linespoint increment 1:',graphopt%linewp-1
+!=================================================================
+! we come here after plotting a Scheil diagram above, try including appfiles
+4000 continue
+!=================================================================
 ! plot command from appfil
     if(appfil.gt.0) then
+!       write(*,*)'ocplot2B appending a file at label 3912'
 ! try to avoid overlapping keys ...
 ! The "restore" for x/yrange means the scaling from the "plot for"
 ! will be used also for the appended data
@@ -1726,30 +1968,75 @@
 ! just one line with plot for ... 
 ! the data to append is already copied as a table
           write(21,'(a)')trim(applines(1))
+! if applines>0 write those lines before "unset"
+          if(multibuffline.gt.0) then
+             do iz=1,multibuffline-1
+                write(21,'(a)')trim(multibuffer(iz))
+             enddo
+          endif
+          multibuffline=0
+          write(21,'(a)')'unset multiplot #appfiletype 2'
+!          write(21,'(a)')'unset multiplot'
           close(appfil)
           appfil=0
-          write(21,'(a)')'unset multiplot'
-       else
+       elseif(multibuffline.gt.0) then
+! these are "plot "-" ... lines, not connected to "set multiplot"
+          write(21,'(a,2i7)')'# not appfiletype 2, multibufline, nofapl',&
+               multibuffline,nofapl
+          do iz=1,multibuffline-1
+             write(21,'(a)')trim(multibuffer(iz))
+          enddo
+          multibuffline=0
           do jj=1,nofapl
              write(21,'(a)')trim(applines(jj))
           enddo
+          write(21,'(a)')'unset multiplot #appfiletype 1'
+          close(appfil)
+          appfil=0
        endif
     endif
 ! if the plot command is "plot '-' ... then
 ! copy the data from the append file, it should be correctly formatted
+! as I understand appfil muste always be 0 here ... no
     if(appfil.gt.0) then
+       if(multibuffline.gt.0) then
+          write(*,*)' *** ocplot2B appending multiplot',multibuffline
+          do iz=1,multibuffline-1
+             write(21,'(a)')trim(multibuffer(iz))
+          enddo
+          multibuffline=0
+!          write(21,'(a)')'unset multiplot # closing appfil'
+       endif
+! appfile header lines
+       write(*,*)'Appfile header lines: ',nofapl
        ic=0
+       write(21,'(a)')'# Copying appfile data'
+! these line contain the 'plot "-" ..."
+       do jj=1,nofapl
+          write(21,'(a)')trim(applines(jj))
+       enddo
 1900   continue
 ! this is copying the actual data to plot from the append file.
+!       write(*,*)'Copying appfile data'
        read(appfil,884,end=1910)appline
 884    format(a)
        ic=ic+1
-       if(appline(1:11).eq.'pause mouse') goto 1900
+! skip pause mouse
+       if(appline(1:12).eq.'pause mouse ') goto 1900
        write(21,884)trim(appline)
        goto 1900
+! end of copying appfile data
 1910   continue
-!       write(*,*)'Appended ',ic,' data lines'
-       write(21,'(a)')'unset multiplot'
+       write(*,*)'Appended ',ic,' data lines'
+!       if(multibuffline.gt.0) then
+! ocplot2B  add multiple plot "multplot" commands ....
+!          write(*,*)'ocplot2B adding prevous multplot ...',multibuffline
+!          do iz=1,multibuffline-1
+!             write(21,884)trim(multibuffer(iz))
+!          enddo
+!       endif
+!       write(21,'(a)')'unset multiplot'
+       write(21,'(a)')'unset multiplot # closing appfil 3'
        close(appfil)
        appfil=0
     endif
@@ -1778,7 +2065,7 @@
 ! if gnuplot cannot be started with gnuplot give normal path ...
 !    gnuplotline='"c:\program files\gnuplot\bin\wgnuplot.exe" '//pfc(1:kkk)//' '
     k3=len_trim(gnuplotline)+1
-    write(kou,*)'Gnuplot command file: ',pfc(1:kk+4)
+!    write(kou,*)'Gnuplot command file: ',pfc(1:kk+4)
     if(graphopt%gnutermsel.ne.1) then
        write(kou,*)'Graphics output file: ',pfh(1:kk+4)
     endif
@@ -1794,14 +2081,14 @@
 ! spawn plot on Windows ?? NOT ISO-TERMAL DIAGRAM
 !          write(*,*)'executing command: "start /B '//trim(gnuplotline)
 !          call execute_command_line('start /B '//gnuplotline(9:k3))
-          write(*,*)'executing command: "start /B '//trim(gnuplotline)//'"'
+    write(*,*)'ocplot2B executing command: "start /B '//trim(gnuplotline)//'"'
           call execute_command_line('start /B '//trim(gnuplotline))
 ! WORKS WITH OCPLOT3B
 !          call execute_command_line('start /B '//trim(gnuplotline))
        else
 !          write(*,*)'plot command: "',gnuplotline(1:k3),'"'
 !          call system(gnuplotline)
-          write(*,*)'executing command: "'//trim(gnuplotline)//'"'
+          write(*,*)'ocplot2B executing command: "'//trim(gnuplotline)//'"'
           call execute_command_line(gnuplotline)
        endif
     else
@@ -1898,8 +2185,8 @@
 ! %tieline_tieline_inplane <0 means step, 0 means isopleth
     if(graphopt%tielines.gt.0) then
        if(maptop%tieline_inplane.le.0) then
-          write(kou,*)'No tie-lines can be plotted'
-          graphopt%tielines=0
+          write(kou,*)' Warning, tie-lines may be wrong'
+!          graphopt%tielines=0
        endif
     endif
 ! same is incremented for each line
@@ -2152,13 +2439,15 @@
           enddo nodeequil
           lineends(same)=plotp
        endif
-!       write(*,*)'jump back to 100, same and plotp',same,plotp
+! jump back to label 100
        goto 100
     endif
 !    do jj=1,same
 !       write(*,23)'phases: ',same,jj,trim(lid(1,jj)),trim(lid(2,jj))
 !    enddo
 !------------------------------------------------
+! Jump here if there is a line with illegal lineid
+772 continue
 ! there can be more maptops linked via plotlink
     if(associated(plottop%plotlink)) then
        jj=plottop%seqx
@@ -2435,6 +2724,7 @@
           '# set label "text" at 0.5, 0.5 rotate by 60 font "arial,12"'/&
           '# set xrange [0.5 : 0.7] '/&
           '# Adding manually a line and keep scaling:'/&
+          '# set arrow x0, y0 to x1,y1 nohead linestyle 1'/&
           '# set multiplot'/&
           '# set xrange [] writeback'/&
           '#  ... plot someting'/&
@@ -3062,7 +3352,7 @@
        read(appfil,884,end=1910)appline
 884    format(a)
        ic=ic+1
-       if(appline(1:11).eq.'pause mouse') then
+       if(appline(1:12).eq.'pause mouse ') then
           write(*,*)'reading appendfile ends at "puase mouse"'
           goto 1910
        else
@@ -3070,7 +3360,7 @@
           goto 1900
        endif
 1910   continue
-!       write(*,*)'Appended ',ic,' data lines'
+       write(*,*)'Appended ',ic,' data lines'
        close(appfil)
        appfil=0
     endif
@@ -3115,11 +3405,11 @@
 ! this is a TERNARY PLOT with 2 extenive axis
 !          write(*,*)'executing command '//trim(gnuplotline(9:))
 !          call system(gnuplotline(9:))
-          write(*,*)'Executing Command: "start /B '//trim(gnuplotline)//'"'
+   write(*,*)'ocplot3B executing Command: "start /B '//trim(gnuplotline)//'"'
 ! WORKS WITH OCPLOT3B
           call execute_command_line('start /B '//trim(gnuplotline))
        else
-!          write(*,*)'executing command '//trim(gnuplotline)
+          write(*,*)'ocplot3B executing command '//trim(gnuplotline)
           call execute_command_line(gnuplotline)
        endif
     else
@@ -3491,28 +3781,30 @@
 100 continue
 !    mapnode=>localtop
     write(kou,101)mapnode%seqx,mapnode%nodeceq%tpval(1),mapnode%noofstph,&
-         mapnode%savednodeceq,mapnode%status,mapnode%lines
-101 format(' Mapnode: ',i5,' at T=',F10.2,' with ',i2,' phases, ceq saved ',&
-         i5,', status ',z8,', lines exit: ',i2)
+         mapnode%savednodeceq,mapnode%lines
+!         mapnode%savednodeceq,mapnode%status,mapnode%lines
+101 format(' Mapnode: ',i3,' at T=',F10.2,', ',i2,' phases, ceq saved ',&
+         i5,', exting lines: ',i2)
     do kl=1,mapnode%lines
        if(.not.associated(mapnode%linehead(kl)%end)) then
           if(mapnode%linehead(kl)%termerr.gt.0) then
-             write(kou,105)mapnode%linehead(kl)%lineid,&
+             write(kou,105)kl,mapnode%linehead(kl)%lineid,&
                   mapnode%linehead(kl)%number_of_equilibria,&
                   mapnode%linehead(kl)%termerr
-105          format('  Line ',i3,' with ',i5,&
+105          format('  Line ',i3,', id: ',i3,' with ',i5,&
                   ' equilibria ended with error: ',i6)
           else
-             write(kou,110)mapnode%linehead(kl)%lineid,&
+             write(kou,110)kl,mapnode%linehead(kl)%lineid,&
                   mapnode%linehead(kl)%number_of_equilibria
-110          format('  Line ',i3,' with ',i5,&
+110          format('  Line ',i3,', id: ',i3,' with ',i5,&
                   ' equilibria ending at axis limit')
           endif
        else
           ll=mapnode%linehead(kl)%end%seqx
-          write(kou,120)mapnode%linehead(kl)%lineid,&
+          write(kou,120)kl,mapnode%linehead(kl)%lineid,&
                mapnode%linehead(kl)%number_of_equilibria,ll
-120       format('  Line ',i3,' with ',i5,' equilibria ending at node ',i3)
+120       format('  Line ',i3,', id: ',i3,' with ',i5,&
+               ' equilibria ending at node ',i3)
        endif
        if(btest(mapnode%linehead(kl)%status,EXCLUDEDLINE)) then
           write(*,*)'Line excluded'
@@ -3521,7 +3813,9 @@
        ll=mapnode%linehead(kl)%first
 !       write(*,*)'SMP2B allcrach 1: ',ll
 ! BOS 191224 add phase names
-       if(ll.gt.0) then
+! tzero lines has no meqrec%phr allocated NOTE kl is K-EL not K-ETT
+! for tzero lines it is listed line 3 and 4 although there are only 2 ????
+       if(ll.gt.0 .and. allocated(mapnode%linehead(kl)%meqrec%phr)) then
 ! only if there is an link to a linehead
           lineeq=>mapnode%linehead(kl)%meqrec
           phases=' '
@@ -3679,23 +3973,23 @@
        endif
        if(.not.associated(mapnode%linehead(kl)%end)) then
           if(mapnode%linehead(kl)%termerr.gt.0) then
-             write(kou,105)mapnode%linehead(kl)%lineid,&
+             write(kou,105)kl,mapnode%linehead(kl)%lineid,&
                   mapnode%linehead(kl)%number_of_equilibria,&
                   mapnode%linehead(kl)%termerr,status,trim(phline)
-105          format('  Line ',i3,' with ',i5,&
-                  ' equilibria ended with error: ',i6/2x,a,' with phases: ',a)
+105          format('  Line ',i3,', id: ',i3,' with ',i5,&
+                  ' equilibria ended with error: ',i6,2x,a/'  with phases: ',a)
           else
-             write(kou,110)mapnode%linehead(kl)%lineid,&
+             write(kou,110)kl,mapnode%linehead(kl)%lineid,&
                   mapnode%linehead(kl)%number_of_equilibria,status,trim(phline)
-110          format('  Line ',i3,' with ',i5,&
-                  ' equilibria ending at axis limit.'/2x,a,' with phases: ',a)
+110          format('  Line ',i3,', id: ',i3,' with ',i5,&
+                  ' equilibria ending at axis limit.',2x,a/'  with phases: ',a)
           endif
        else
           ll=mapnode%linehead(kl)%end%seqx
-          write(kou,120)mapnode%linehead(kl)%lineid,&
+          write(kou,120)kl,mapnode%linehead(kl)%lineid,&
                mapnode%linehead(kl)%number_of_equilibria,ll,status,trim(phline)
-120       format('  Line ',i3,' with ',i5,' equilibria ending at node ',i3/&
-               2x,a,' with phases: ',a)
+120       format('  Line ',i3,', id: ',i3,' with ',&
+               i5,' equilibria ending at node ',i3,2x,a/'  with phases: ',a)
        endif
        ll=mapnode%linehead(kl)%first
 ! if deleted ask for Restore, else ask for Keep or Delete
@@ -3936,8 +4230,17 @@
           enddo loop2
 ! if we come here we have a new title in the appfiles,
 ! that should be assigned newls
-          write(*,*)'New label in appfiles: ',trim(applines(j1))
-          stop
+          ip=index(applines(j1),' lines ls ')+10
+          if(ip.le.0) then
+             write(*,*)'Old color in appfile: ',trim(applines(j1))
+             stop
+          else
+! reuse the same color for something else
+! changing like this created problems below ... try reuse old color
+!             write(applines(j1)(ip:ip+1),'(i2)')same+1
+             applines(j1)(ip:ip+1)='01'
+             write(*,*)'New color in appfile: ',trim(applines(j1))
+          endif
        else
 ! this is a line without title but we may have to change number after "line ls"
           ip=index(applines(j1),' lines ls ')
@@ -3961,15 +4264,20 @@
              enddo getls
 ! if k1>found then we have not found oldls
              if(k1.gt.found) then
-                write(*,79)'Cannot find oldls: ',oldls,k1,found,j1,&
+                write(*,79)'Cannot find old ls: ',oldls,k1,found,j1,&
                      trim(applines(j1))
 79              format(a,4i3,' in ',a)
                 write(*,'(10(i2,i3))')(changels(1,k1),changels(2,k1),k1=1,found)
-                stop
+! replace colow with 01
+                ip=index(applines(j1),' lines ls ')
+                applines(j1)(ip+10:ip+11)='01'
+!                stop
              endif
 ! write the new ls number in applines(j1)
 100          continue
-             write(applines(j1)(ip:ip+1),'(i2)')changels(2,k1)
+!             write(applines(j1)(ip:ip+1),'(i2)')changels(2,k1)
+! line above must be wrong, changed to that below 2021.03.08/BoS, then removed 
+!             write(applines(j1)(ip+10:ip+11),'(i2)')changels(2,k1)
 !             write(*,*)'Changed ls: ',trim(applines(j1))
 !          else
 !             write(*,*)'skipping: ',trim(applines(j1))

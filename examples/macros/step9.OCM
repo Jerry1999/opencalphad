@@ -61,6 +61,7 @@ c e
 l , 2
 
 
+
 @$ We have an ordered constitution
 @&
 @$ Set a T axis with very small step
@@ -119,14 +120,16 @@ l,,,,
 
 @$ We have the same equilibrium but with different conditions
 @&
-
-set c y(b2,b)-y(b2,b#2)=.01
+@$ Make the difference smaller, i.e. closer to order/diorder transition
 
 l c
-@$ We have too many conditions as the y differnce appears twice
-@$ We can easily remove the old one, condition 4, with this command
 
-set c 4:=none
+@$ set c y(b2,b)-y(b2,b#2)=.01
+@$ This rather crypric command change the value of condition 4
+set c 4:=0.01
+
+l c
+
 
 @&
 
@@ -134,7 +137,7 @@ c e
 
 l,,,,,
 
-@$ In priciple we could also relase the condition on T
+@$ In priciple we could also release the condition on T
 @$ but the convergence is then very bad, better to keep T constant.
 @$
 

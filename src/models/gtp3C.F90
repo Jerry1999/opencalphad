@@ -1419,9 +1419,9 @@
 !      write(*,*)'3C back from gpafilex',ftyp,' "',trim(fil),'"'
       ipos=len_trim(fil)
       if(ipos.le.0) then
-         write(*,*)'No file name, using "database"'
-         fil='database'
-         ipos=8
+         write(*,*)'No file name, quit'
+         gx%bmperr=4399
+         goto 1000
       endif
 ! if there is a segmentation fault it is inside gparfilex  SUCK
 !      write(*,*)'3C file name: ',trim(fil)
@@ -1483,6 +1483,7 @@
    case(2) ! ftyp=2 TDB format
 ! CHTD1 keeps track of type definitions, note: incremented before use
       CHTD='0'
+      if(notallowlisting(privilege)) goto 1000
       write(unit,106)date(1:4),date(5:6),date(7:8)
 106   format('$ Database file written by Open Calphad ',a,'-',a,'-',a/)
       call list_all_elements2(unit)
@@ -1613,7 +1614,27 @@
            phlista(lokph)%noofsubl,phlista(lokph)%status1,&
            ceq%phase_varres(lokcs)%status2
 110   format(a,' model: ',a/'  Number of sublattices: ',i2,&
-           ', status: ',z8,1x,z8,5x)
+           ', status: ',z8,1x,z8,2x,a)
+      L78=' '
+      knr=0
+      if(btest(phlista(lokph)%status1,PHFORD)) then
+! Phases as FCC or BCC permutations
+         L78='  FCC permutations.'
+         knr=20
+      elseif(btest(phlista(lokph)%status1,PHBORD)) then
+         L78='  BCC permutations'
+         knr=20
+      endif
+      if(btest(phlista(lokph)%status1,PHMFS)) then
+! This phase has a disordered fraction set
+         if(btest(phlista(lokph)%status1,PHSORD)) then
+            L78(knr:)='  Ordered part not subtrated.'
+         else
+            L78(knr:)='  Ordered part subracted.'
+         endif
+         knr=len_trim(L78)
+      endif
+      if(knr.gt.0) write(lut,'(a)')trim(L78)
    endif
    addrec=>phlista(lokph)%additions
    lastadd: do while(associated(addrec))
@@ -1797,8 +1818,8 @@
 !                                123456789.123456789.1234
    elseif(btest(phlista(lokph)%status1,PHBORD)) then
       special(1:1)='B'; modelid='BCC permutation ordering'
-   elseif(btest(phlista(lokph)%status1,PHSORD)) then
-      special(1:1)='S'; modelid='Intermetallic ordering'
+!   elseif(btest(phlista(lokph)%status1,PHSORD)) then
+!      special(1:1)='S'; modelid='Intermetallic ordering'
    elseif(btest(phlista(lokph)%status1,PHIONLIQ)) then
       special(1:1)='I'; modelid='Ionic 2-sblattice liquid'
 !                                123456789.123456789.1234
@@ -1828,12 +1849,15 @@
       special(kkk:kkk)='D'; kkk=kkk+1
    endif
    lokcs=phlista(lokph)%linktocs(ics)
-   if(btest(firsteq%phase_varres(lokcs)%status2,CSORDER)) then
+! wrong use of CSORDER, it is set if the ordered part already disordered
+! no need to calculate it again
+!   if(btest(firsteq%phase_varres(lokcs)%status2,CSORDER)) then
+! PHSORD is the correct bit to test if the ordered part should not be subrracted
+   if(.not.btest(phlista(lokph)%status1,PHSORD)) then
 ! this indicates if ordered part should be subtracted as ordered
-! for some historical illogical reason PHSUBO is not used but CSORDER
       special(kkk:kkk)='S'; kkk=kkk+1
    endif
-! special is 4 characters
+! special is max 4 characters
 ! This subroutine is independent of current equilibrium, use firsteq
 !   write(lut,10)phname,phlista(lokph)%status1,special,&
 !        nsl,(phlista(lokph)%sites(ll),ll=1,nsl)
@@ -1897,6 +1921,7 @@
       subref=.TRUE.
    endif
    parlist=1
+   if(notallowlisting(privilege)) goto 1000
 !--------------------------------------------------
 ! return here to list disordered parameters
 100 continue
@@ -3637,7 +3662,7 @@
 !\begin{verbatim}
  subroutine get_one_condition(ip,text,seqz,ceq)
 ! list the condition with the index seqz into text
-! It lists also fix phases and conditions that are not active
+! It lists also fix phases (and conditions that are not active?)
    implicit none
    integer ip,seqz
    character text*(*)
@@ -3657,6 +3682,7 @@
    last=>ceq%lastcondition
    current=>last
 70 continue
+!      write(*,*)'3C get_one_cond: ',current%seqz
       if(current%seqz.eq.seqz) goto 100
       current=>current%next
       if(.not.associated(current,last)) goto 70
@@ -4323,6 +4349,224 @@
 1000 continue
    return
  end subroutine find_defined_property
+
+!/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\
+
+!\addtotable subroutine find_defined_property3
+!\begin{verbatim}
+ subroutine find_defined_property3(symbol,mode,typty,iph,ics)
+! Revised version of old routine called by get_many_svar
+! allows wildcards in some cases and should handle # and * better ...
+! searches the propid list for one with symbol or identifiction typty
+! if mode=0 then symbol given, if mode=1 then typty given
+! symbol can be TC(BCC), BM(FCC), MQ&FE(HCP) etc, the phase must be 
+! given in symbol as otherwise it is impossible to find the consititent!!!
+! A constituent may have a sublattice specifier, MQ&FE#3(SIGMA)
+   implicit none
+   integer mode,typty,iph,ics
+   character symbol*(*)
+!\end{verbatim}
+   character phsym*24,specid*24,nude*4,mpi*32
+   integer splink,k1,k2,lattice,lokph,ityp,iel,kk,ll,jj
+   integer jtyp
+!   write(*,7)'3C fdp 1: ',symbol(1:5),mode,typty,iph,ics
+7  format(a,a,5i5)
+   lokph=0
+   if(mode.eq.0) then
+! parameter identifier given, can include & # and ( ) like MQ&FE#3(SIGMA)
+      lattice=0
+      nude=' '
+      specid=' '
+! extract the part before (
+      k1=index(symbol,'(')
+      mpi=symbol(1:k1-1)
+      k1=index(mpi,'&')
+      if(k1.gt.0) then
+! there is a component included in the mpi, extract it
+         nude=mpi(1:k1-1)
+         k2=index(symbol,'#')
+         if(k2.gt.0) then
+! there is a sublattice indication
+!            k2=index(symbol,'(')
+!            if(k2.eq.0) then
+!               write(*,*)'3C: Missing phase specifier in property symbol 1'
+!               write(*,*)'Error in symbol: ',symbol
+!               gx%bmperr=4290; goto 1000
+!            endif
+!         else
+            lattice=ichar(symbol(k2+1:k2+1))-ichar('0')
+            if(lattice.le.0 .or. lattice.gt.9) then
+!               write(*,*)'3C Sublattice outside range in property symbol'
+               gx%bmperr=4290; goto 1000
+            endif
+         endif
+         specid=symbol(k1+1:k2-1)
+         call capson(specid)
+      endif
+      k1=index(symbol,'(')
+      if(k1.gt.0) then
+! there must be a phase name within ( ) unless mode=0
+         k2=index(symbol,')')
+         if(k2.lt.k1) then
+!            write(*,*)'3C Missing phase specifier in property symbol 2'
+!            write(*,*)'Symbol: ',symbol
+            gx%bmperr=4291; goto 1000
+         endif
+! we should allow phase name * and maybe #
+         phsym=symbol(k1+1:k2-1)
+         if(phsym(1:1).eq.'*') then
+            iph=-1; ics=-1
+         elseif(phsym(1:1).eq.'#') then
+            iph=-100; ics=-100
+         else
+            call find_phase_by_name(phsym,iph,ics)
+            if(gx%bmperr.ne.0) goto 1000
+            lokph=phases(iph)
+         endif
+         if(nude(1:1).eq.' ') nude=symbol(1:k1-1)
+!      elseif(mode.ne.0) then
+      else
+! we are here because mode=0
+         write(*,*)'3C Missing phase specifier in property symbol 3'
+         write(*,*)'Symbol: ',symbol,mode
+         gx%bmperr=4291; goto 1000
+!      else
+! mode=0 means just ignore
+!         write(*,*)'3C mode: ',mode,iph,ics
+!         goto 1000
+      endif
+! now nude is the property id, lokph is phase location, specid is element or
+! constituent symbol, lattice is sublattice number
+      call capson(nude)
+!      write(*,*)'3C fdp 2: ',iph,ics,nude
+      do ityp=2,ndefprop
+! skip index 1 as G is a state variable
+!         write(*,*)'3C fdp 3: ',ityp,nude,propid(ityp)%symbol
+         if(propid(ityp)%symbol.ne.nude) cycle
+         if(btest(propid(ityp)%status,IDELSUFFIX)) then
+! element specifier, IBM&CR(BCC) (when we have element specific Bohr magnetons)
+!            write(*,*)'3C fdp 4: element: ',specid
+            call find_element_by_name(specid,iel)
+            if(gx%bmperr.ne.0) goto 1000
+            typty=100*ityp+iel
+            goto 200
+         elseif(btest(propid(ityp)%status,IDCONSUFFIX)) then
+! constituent specifier, for example: MQ&FE#3(SIGMA)
+! in this case 
+!            write(*,*)'3C fdp 5: constituent: ',specid
+            if(lokph.eq.0) then
+               write(*,*)'3C phase specification needed for: ',trim(mpi)
+               gx%bmperr=4399; goto 1000
+            endif
+            kk=0
+            do ll=1,phlista(lokph)%noofsubl
+               do jj=1,phlista(lokph)%nooffr(ll)
+                  kk=kk+1
+                  splink=phlista(lokph)%constitlist(kk)
+                  if(splink.le.0) then
+!                     write(*,*)'3C Illegal use of woildcard 3'
+                     gx%bmperr=4286; goto 1000
+                  endif
+                  if(specid.eq.splista(splink)%symbol .and. &
+                       (lattice.eq.0 .or. lattice.eq.ll)) then
+                     typty=100*ityp+kk
+                     goto 200
+                  endif
+               enddo
+            enddo
+         else
+! property without specifier like TC(FCC)
+            typty=ityp
+            goto 200
+         endif
+      enddo
+! if we come here we have not found the constituent or element or property
+! it may be OK anyway if this is a call to test if symbol exists ??
+!      write(*,*)'3C Illegal property symbol'
+      gx%bmperr=4290; goto 1000
+! we must return property number, phase location, element
+! the value TYPTY stored in property records is "idprop" or
+! if IDELSUFFIX set then 100*"idprop"+ellista index of element
+! if IDCONSUFFIX set then 100*"idprop"+constituent index
+200   continue
+   else
+! indices given, typty, iph and ics, construct the symbol
+! if typty>100 there is also an element or constituent specifier
+      lokph=phases(iph)
+!      write(*,*)'3C fdp 10: ',typty,iph,ics,lokph
+      ityp=typty
+      jtyp=-1
+      if(ityp.gt.100) then
+         ityp=typty/100
+         jtyp=typty-100*ityp
+      endif
+      if(ityp.le.1 .or. ityp.gt.ndefprop) then
+!         write(*,*)'3C Property number outside range ',ityp,typty
+         gx%bmperr=4292; goto 1000
+      endif
+      symbol=propid(ityp)%symbol
+      if(btest(propid(ityp)%status,IDELSUFFIX)) then
+! could one have /- as specifier??? NO !! But maye Va
+         if(jtyp.lt.0) then
+!            write(*,*)'3C Missing element index in property symbol'
+            gx%bmperr=4290; goto 1000
+         endif
+         if(jtyp.lt.0 .or. jtyp.gt.noofel) then
+!            write(*,*)'3C Too high element index in property symbol'
+            gx%bmperr=4290; goto 1000
+         endif
+         symbol=symbol(1:len_trim(symbol))//'&'//ellista(jtyp)%symbol
+      elseif(btest(propid(ityp)%status,IDCONSUFFIX)) then
+         if(jtyp.lt.0) then
+!            write(*,*)'3C Missing constituent index in property symbol'
+            gx%bmperr=4290; goto 1000
+         endif
+         if(iph.le.0 .or. iph.gt.noofph) then
+!            write(*,*)'3C Illegal phase location in property symbol'
+            gx%bmperr=4290; goto 1000
+         endif
+         kk=0
+         do ll=1,phlista(lokph)%noofsubl
+            do jj=1,phlista(lokph)%nooffr(ll)
+               kk=kk+1
+               if(kk.eq.jtyp) then
+                  splink=phlista(lokph)%constitlist(kk)
+                  if(splink.le.0) then
+!                     write(*,*)'3C Illegal use of woildcard 4'
+                     gx%bmperr=4286; goto 1000
+                  endif
+                  specid=splista(splink)%symbol
+                  if(ll.gt.1) then
+                     specid=specid(1:len_trim(specid))//&
+                          '#'//char(ichar('0')+ll)
+                  endif
+                  goto 400
+               endif
+            enddo
+         enddo
+! we come here is we failed to find the constituent
+         write(*,*)'3C Illegal constituent index in property symbol'
+         gx%bmperr=4290; goto 1000
+400      continue
+         symbol=symbol(1:len_trim(symbol))//'&'//specid
+      elseif(jtyp.gt.0) then
+         write(*,*)'3C This property has no specifier'
+         gx%bmperr=4290; goto 1000
+      endif
+! add the phase
+!      write(*,*)'3C fdp 11: ',lokph,ics
+      symbol=symbol(1:len_trim(symbol))//'('//phlista(lokph)%name
+      if(ics.lt.0 .or. ics.gt.phlista(lokph)%noofcs) then
+!         write(*,*)'3C No such composition set'
+         gx%bmperr=4072; goto 1000
+      endif
+      if(ics.gt.1) symbol=symbol(1:len_trim(symbol))//'#'//char(ichar('0')+ics)
+      symbol=symbol(1:len_trim(symbol))//')'
+!      write(*,*)'3C fdp 12: ',symbol(1:20)
+   endif
+1000 continue
+   return
+ end subroutine find_defined_property3
 
 !/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\
 

@@ -201,10 +201,10 @@
 !.......................................
 ! Debye or Einstein temperature 7
    npid=npid+1
-   propid(npid)%symbol='THETA '
-   propid(npid)%note='Debye or Einstein temp'
+   propid(npid)%symbol='LNTH '
+   propid(npid)%note='LN(Debye or Einstein temp)'
    propid(npid)%status=0
-! THETA cannot depend on T but on P
+! LNTH cannot depend on T but on P
    propid(npid)%status=ibset(propid(npid)%status,IDONLYP)
 !....................................... 8
 ! Molar volume at T=298.15, 1 bar
@@ -235,9 +235,9 @@
    propid(npid)%note='Alternative volume parameter'
    propid(npid)%status=0
 !....................................... 12
-! Diffusion volume parameter 
+! Diffusion volume parameter, suffix S on V create confusion with S as SER?
    npid=npid+1
-   propid(npid)%symbol='VS '
+   propid(npid)%symbol='VD '
    propid(npid)%note='Diffusion volume parameter '
    propid(npid)%status=0
 !.......................................
@@ -256,7 +256,7 @@
 ! RT*ln(Frequency factor of mobility)  14
    npid=npid+1
    propid(npid)%symbol='MF '
-   propid(npid)%note='RT*ln(mobility freq.fact.)'
+   propid(npid)%note='RT*LN(mobility freq.fact.)'
    propid(npid)%status=0
 ! MF is specific for a constituent
    propid(npid)%status=ibset(propid(npid)%status,IDCONSUFFIX)
@@ -282,7 +282,7 @@
 ! Smooth unit step function (or second Einstein function) 17
    npid=npid+1
    propid(npid)%symbol='THT2 '
-   propid(npid)%note='Smooth step function Tcrit'
+   propid(npid)%note='LN(Smooth step function Tcrit)'
    propid(npid)%status=0
 ! THT2 cannot depend on T but on P
    propid(npid)%status=ibset(propid(npid)%status,IDONLYP)
@@ -1460,7 +1460,7 @@ end function find_phasetuple_by_indices
       enddo sploop
    enddo lloop
 90 continue
-!   write(*,*)'3A current: ',icon,first,loksp
+!   write(*,*)'3A current: ',icon,first,loksp,' "',trim(spname1),'"'
    if(first.eq.0) then
 ! no such constituent
       gx%bmperr=4096
@@ -1503,6 +1503,7 @@ end function find_phasetuple_by_indices
 !      write(*,*)'No such constituent'
       gx%bmperr=4096
    endif
+!   write(*,*)'3A get_constituent_name: ',iph,iseq,' "',trim(spname),'"'
 1000 continue
    return
  end subroutine get_constituent_name
@@ -1531,6 +1532,31 @@ end function find_phasetuple_by_indices
       gx%bmperr=4042
    endif
  end subroutine get_element_data
+
+!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\
+
+!\addtotable subroutine new_element_data
+!\begin{verbatim}
+ subroutine new_element_data(iel,elsym,elname,refstat,mass,h298,s298)
+! set new values in an element record, only mass allowed to change ...
+   implicit none
+   character elsym*2, elname*(*),refstat*(*)
+   double precision mass,h298,s298
+   integer iel
+!\end{verbatim}
+   integer lokel
+   if(iel.gt.0 .and. iel.le.noofel) then
+      lokel=elements(iel)
+!      ellista(lokel)%symbol=elsym
+!      ellista(lokel)%name)=elname
+!      ellista(lokel)%ref_state=refstate
+      ellista(lokel)%mass=mass
+!      ellista(lokel)%h298_h0=h298
+!      ellista(lokel)%s298=s298
+   else
+      gx%bmperr=4042
+   endif
+ end subroutine new_element_data
 
 !/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\
 

@@ -4,7 +4,7 @@
 !
 MODULE GENERAL_THERMODYNAMIC_PACKAGE
 !
-! Copyright 2011-2020, Bo Sundman, France
+! Copyright 2011-2021, Bo Sundman, France
 !
 !    This program is free software; you can redistribute it and/or modify
 !    it under the terms of the GNU General Public License as published by
@@ -667,7 +667,7 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
 ! HASP phase has at least one parameter entered
 ! FORD phase has 4 sublattice FCC ordering with parameter permutations
 ! BORD phase has 4 sublattice BCC ordering with parameter permutations
-! SORD phase has TCP type ordering (like for sigma)
+! SORD phase has TCP type ordering (do not subract ordered as disordered, NEVER)
 ! MFS phase has a disordered fraction set
 ! GAS this is the gas phase (first in phase list) 
 ! LIQ phase is liquid (can be several but listed directly after gas)
@@ -797,7 +797,7 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
 ! if not set the addition is not listed
 ! permol set if addition should be muliplied with number of atoms
   integer, parameter :: &
-       ADDHAVEPAR=0, ADDPERMOL=1
+       ADDHAVEPAR=0, ADDPERMOL=1,ADDBCCMAG=2
 !
 ! >>> Bits for symbols and TP functions missing ???
 !\end{verbatim}
@@ -886,6 +886,45 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
 ! Note that additions often use extra parameters like Curie or Debye
 ! temperatures defined by model parameter identifiers stored in gtp_propid
 !\end{verbatim}
+!\begin{verbatim}  
+! Model parameter identifiers entered in gtp3A.F90 and used mainly in gtp3H
+! to calculate additions.  Used also in gtp3B when entering parameters
+! Index Name Used in addition/model
+!  1     G    Gibbs energy for endmembers or interactions
+!  2     TC   Curie T in Inden-Hillert magnetic model
+!  3 BMAG  - -                                   1 Average Bohr magneton numb
+!  4 CTA   - P                                   2 Curie temperature
+!  5 NTA   - P                                   2 Neel temperature
+!  6 IBM   - P &<constituent#sublattice>;       12 Individual Bohr magneton num
+!  7 THET  - P                                   2 Debye or Einstein temp
+!  8 V0    - -                                   1 Volume at T0, P0
+!  9 VA    T -                                   4 Thermal expansion
+! 10 VB    T P                                   0 Bulk modulus
+! 11 VC    T P                                   0 Alternative volume parameter
+! 12 VS    T P                                   0 Diffusion volume parameter
+! 13 MQ    T P &<constituent#sublattice>;       10 Mobility activation energy
+! 14 MF    T P &<constituent#sublattice>;       10 RT*ln(mobility freq.fact.)
+! 15 MG    T P &<constituent#sublattice>;       10 Magnetic mobility factor
+! 16 G2    T P                                   0 Liquid two state parameter
+! 17 THT2  - P                                   2 Smooth step function Tcrit
+! 18 DCP2  - P                                   2 Smooth step function increm.
+! 19 LPX   T P                                   0 Lattice param X axis
+! 20 LPY   T P                                   0 Lattice param Y axis
+! 21 LPZ   T P                                   0 Lattice param Z axis
+! 22 LPTH  T P                                   0 Lattice angle TH
+! 23 EC11  T P                                   0 Elastic const C11
+! 24 EC12  T P                                   0 Elastic const C12
+! 25 EC44  T P                                   0 Elastic const C44
+! 26 UQT   T P &<constituent#sublattice>;       10 UNIQUAC residual parameter
+! 27 RHO   T P                                   0 Electric resistivity
+! 28 VISC  T P                                   0 Viscosity
+! 29 LAMB  T P                                   0 Thermal conductivity
+! 30 HMVA  T P                                   0 Enthalpy of vacancy form.
+! 31 TSCH  - P                                   2 Schottky anomaly T
+! 32 CSCH  - P                                   2 Schottky anomaly Cp/R.
+! 33 QCZ   - -                                   1 MQMQA cluster coord factor
+! DO NOT CHANGE THE ORDER in gtp3A, that would require changes elsewhere too
+!\end{verbatim}  
 ! =================================================================
 !
 ! below here are data structures and global data in this module
@@ -1301,18 +1340,23 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
 !-----------------------------------------------------------------
 !\begin{verbatim}
 ! this constant must be incremented when a change is made in gtp_phase_add
-  INTEGER, parameter :: gtp_phase_add_version=1
+  INTEGER, parameter :: gtp_phase_add_version=2
   TYPE gtp_phase_add
 ! record for additions to the Gibbs energy for a phase like magnetism
 ! addrecno: ?
 ! aff: antiferomagnetic factor (Inden model)
-! status: BIT 1 set if there are parameters
+! constants: for some constants needed ?? NEW
+! status: BIT 0 set if there are parameters
+!         BIT 1 set if magnetic model is for BCC
 ! need_property: depend on these properties (like Curie T)
-! explink: function to calculate with the properties it need
+! explink: function to calculate with the properties it need (not allocatable?)
 ! nextadd: link to another addition
      integer type,addrecno,aff,status
      integer, dimension(:), allocatable :: need_property
+     double precision, dimension(:), allocatable :: constants
      TYPE(tpfun_expression), dimension(:), pointer :: explink
+! The following declaration is illegal ... but above OK and I can allocate
+!     TYPE(tpfun_expression), dimension(:), allocatable, pointer :: explink
      TYPE(gtp_phase_add), pointer :: nextadd
      type(gtp_elastic_modela), pointer :: elastica
      type(gtp_diffusion_model), pointer :: diffcoefs
@@ -1399,6 +1443,8 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
 ! A tuplet index always refer to the same phase+compset.  New tuples with
 ! the same phase and other compsets are added at the end.
 ! BUT if a compset>1 is deleted tuples with higher index will be shifted down!
+! CONFUSING ixphase is usually iph, phases in alphabetical order in phases
+!           lokph is usually lokph, location in phlista
      integer lokph,compset,ixphase,lokvares,nextcs
 ! >>>>>>>>>>>> old     integer phaseix,compset,ixphase,lokvares,nextcs
   end TYPE gtp_phasetuple
@@ -1530,6 +1576,11 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
   end TYPE gtp_state_variable
 ! used for state variables/properties in various subroutines
 !\end{verbatim}
+! statevarid: defined in decode_state_variable3 in gtp3F.F90
+! potentials: 1=T;   2=P;   3=MU;  4=AC;  5=LNAC
+! extensive:  6=U;   7=S;   8=V;   9=H;  10=A;    11=G;
+! phase:     12=NP; 13=BP; 14=Q ; 15=DG
+! amounts:   16=N;  17=X;  18=B;  19=W;  20=Y
 !-----------------------------------------------------------------
 !\begin{verbatim}
 ! this constant must be incremented when a change is made in gtp_condition
@@ -2016,6 +2067,7 @@ MODULE GENERAL_THERMODYNAMIC_PACKAGE
   logical, private :: ttrace
 ! Output for debugging gridmin
   integer, private :: lutbug=0
+  double precision :: proda=zero,privilege=zero
 ! minimum constituent fraction
   double precision :: bmpymin
 ! number of defined property types like TC, BMAG etc

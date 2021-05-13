@@ -6,8 +6,8 @@
 ! Additions have a unique number, given sequentially as implemented 
 ! These are all defined in gtp3.F90
 !  integer, public, parameter :: INDENMAGNETIC=1
-!  integer, public, parameter :: DEBYECP=3
 !  integer, public, parameter :: XIONGMAGNETIC=2
+!  integer, public, parameter :: DEBYECP=3
 !  integer, public, parameter :: EINSTEINCP=4
 !  integer, public, parameter :: TWOSTATEMODEL1=5
 !  integer, public, parameter :: ELASTICMODEL1=6
@@ -44,43 +44,43 @@
 !   write(*,*)'3H select addition: ',addrec%type
    addition: select case(addrec%type)
    case default
-      write(kou,*)'No such addition type ',addrec%type,lokph
+      write(kou,*)'3H No such addition type ',addrec%type,lokph
       gx%bmperr=4330
-! 1 indenmagnetic
+! 1 Inden-Hillert magnetic
    case(indenmagnetic) ! Inden magnetic 
       addrec%propval=zero
       call calc_magnetic_inden(moded,phres,addrec,lokph,mc,ceq)
-! 2 Debye Cp
-   case(debyecp) ! Debye Cp
-      addrec%propval=zero
-      call calc_debyecp(moded,phres,addrec,lokph,mc,ceq)
-      write(kou,*)' Debye Cp model not implemented yet'
-      gx%bmperr=4331
-! 3
+! 2 Inden-Hillert-Qing-Xiong magnetism
    case(xiongmagnetic) ! Inden-Qing-Xiong
       addrec%propval=zero
       call calc_xiongmagnetic(moded,phres,addrec,lokph,mc,ceq)
-!     write(kou,*)'Inden-Qing-Xiong magn model not implemented yet'
+!      write(kou,*)'3H Inden-Qing-Xiong magn model not tested yet'
 !      gx%bmperr=4332
-! 4
+! 3 Debye Cp
+   case(debyecp) ! Debye Cp
+      addrec%propval=zero
+      call calc_debyecp(moded,phres,addrec,lokph,mc,ceq)
+      write(kou,*)'3H Debye Cp model not implemented yet'
+      gx%bmperr=4331
+! 4 Einsten Cp
    case(einsteincp) ! Einstein Cp
       addrec%propval=zero
       call calc_einsteincp(moded,phres,addrec,lokph,mc,ceq)
 !      gx%bmperr=4331
-! 5  
+! 5  Twostate liquid
    case(twostatemodel1) ! Two state model with composition variable G2
       addrec%propval=zero
 !      write(*,*)'3H selecting calc_twostate_model1: ',mc
       call calc_twostate_model1(moded,phres,addrec,lokph,mc,ceq)
 ! changed below not to calculate G2 as a mixing parameter
 !      call calc_twostate_model2(moded,phres,addrec,lokph,mc,ceq)
-! 6 
+! 6 Elastic model
    case(elasticmodel1) ! Elastic model !
       addrec%propval=zero
       call calc_elastica(moded,phres,addrec,lokph,mc,ceq)
       write(kou,*)' Elastic model not implemented yet'
       gx%bmperr=4399
-! 7
+! 7 Volume model
    case(volmod1) ! Simple volume model depending on V0, VA and VB
       addrec%propval=zero
       call calc_volmod1(moded,phres,addrec,lokph,mc,ceq)
@@ -127,8 +127,9 @@
    double precision xxx
    character name*24
    type(gtp_phase_add), pointer :: newadd,addrec,lastrec
-   logical bcc
+   logical bcc,ibm
 !
+!   write(*,*)'3H creating addrecord: ',trim(extra),addtyp,lokph
 ! check if this addition already entered
    lastrec=>phlista(lokph)%additions
    addrec=>lastrec
@@ -170,8 +171,11 @@
       else
          bcc=.FALSE.
       endif
+      ibm=.FALSE.
+      if(extra(2:2).eq.'I') ibm=.TRUE.
 ! lokph because we need to check if average or individual Boghr magnetons
-      call create_xiongmagnetic(newadd,lokph,bcc)
+!      call create_xiongmagnetic(newadd,lokph,bcc)
+      call create_xiongmagnetic(newadd,ibm,bcc)
 !-----------------------------------------
    case(debyecp) ! Debye Cp UNUSED
 ! 3
@@ -226,7 +230,7 @@
 !-----------------------------------------
    if(gx%bmperr.ne.0) goto 1000
 ! initiate status word for this addition
-   newadd%status=0
+!   newadd%status=0
    if(associated(phlista(lokph)%additions)) then
 !      write(*,*)'3H adding new addition record to phase  ',lokph,addtyp
       lastrec%nextadd=>newadd
@@ -369,6 +373,7 @@
 ! store data in record
    allocate(addrec%explink(2))
    nullify(addrec%nextadd)
+   addrec%status=0
    addrec%aff=aff
    addrec%type=indenmagnetic
 ! attempt to remove memory leak
@@ -638,7 +643,7 @@
 ! the size of the phase ...
    if(btest(lokadd%status,ADDPERMOL)) then
       addpermole=.TRUE.; msize=phres%abnorm(1)
-      write(*,'(a,i4,l2,1pe12.4)')'3H msize magadd 1: ',lokph,addpermole,msize
+!      write(*,'(a,i4,l2,1pe12.4)')'3H msize magadd 1: ',lokph,addpermole,msize
 ! UNFINISHED: ignoring that msize depend on fractions
    else
       addpermole=.FALSE.; msize=one
@@ -675,20 +680,21 @@
 
 !\addtotable subroutine create_xiongmagnetic
 !\begin{verbatim}
- subroutine create_xiongmagnetic(addrec,lokph,bcc)
+ subroutine create_xiongmagnetic(addrec,ibm,bcc)
 ! adds a Xiong type magnetic record, we must separate fcc and bcc by extra
 ! copied from Inden magnetic model
-! The difference is that it uses TCA for Curie temperature and TNA for Neel
-! and individual Bohr magneton numbers
+! The difference is that it uses CTA for Curie temperature and NTA for Neel
+! and individual (IBM=.TRUE.) or average Bohr magneton numbers 
+! BCC is .TRUE. if it is a BCC phase
    implicit none
-   logical bcc
-   integer lokph
+   logical ibm,bcc
+!   integer lokph
    type(gtp_phase_add), pointer :: addrec
 !\end{verbatim} %+
-   integer typty,ip,nc
+   integer typty,ip,nc,jj
    character text*128
    integer, parameter :: ncc=6
-   double precision coeff(ncc)
+   double precision coeff(ncc),dval
    integer koder(5,ncc)
 !   TYPE(tpfun_expression), pointer :: llow,lhigh
    TYPE(tpfun_expression) :: llow,lhigh
@@ -725,11 +731,16 @@
 !       -.0261039233*TAO**(-7)-8.70130777E-04*TAO**(-21)
 !      -1.84262988E-04*TAO**(-35)-6.65916411E-05*TAO**(-49)
 !
+!   write(*,*)'3H Qing-Xiong magnetic model',bcc
+!
    if(bcc) then
 ! Magnetic function below Curie/Neel Temperature, 
 ! problem in ct1xfn to start a function with +1 or 1
       text=' +1-.880323235*T**(-1)-.152870878*T**3-.00679426123*T**9'//&
            '-.00152870878*T**15-5.67238878E-04*T**21'
+! CHANGE OF REFERENCE STATE OF THE ELEMENTS
+!      text=' +1-.152870878*T**3-.00679426123*T**9'//&
+!           '-.00152870878*T**15-5.67238878E-04*T**21'
 !      write(*,*)'3H emm 1: ',trim(text)
       ip=1
       nc=ncc
@@ -742,6 +753,9 @@
 ! Magnetic function above Curie/Neel Temperature
       text='-.0403514888*T**(-7)-.00134504963*T**(-21)'//&
            '-2.84834039E-04*T**(-35)-1.02937472E-04*T**(-49)'
+! CHANGE OF REFERENCE STATE OF THE ELEMENTS
+!      text=' +.880323235*T**(-1)-.0403514888*T**(-7)-.00134504963*T**(-21)'//&
+!           '-2.84834039E-04*T**(-35)-1.02937472E-04*T**(-49)'
 !       write(*,*)'3H emm 2: ',trim(text)
       ip=1
       nc=ncc
@@ -749,12 +763,16 @@
       if(gx%bmperr.ne.0) goto 1000
       call ct1mexpr(nc,coeff,koder,lhigh)
       if(gx%bmperr.ne.0) goto 1000
-
+! this is 1/(p*D) in eq. A9 in Qing et al, p=0.37
+!   dval=0.880323235D0
+      dval=one/(0.49649686D0+0.37D0*(0.33461979D0-0.49649686D0))
+!      write(*,*)'3H added Qing-Xiong magnetic contribution to a bcc phase'
    else
 !------------
 ! fcc
 ! Magnetic function below Curie/Neel Temperature
-      text='+1-.842849633*T**(-1)-.174242226*T**3-.00774409892*T**9'//&
+! REFERENCE STATE AT T=0
+      text=' +1-.842849633*T**(-1)-.174242226*T**3-.00774409892*T**9'//&
            '-.00174242226*T**15-6.46538871E-04*T**21'
       ip=1
       nc=ncc
@@ -763,38 +781,58 @@
       call ct1mexpr(nc,coeff,koder,llow)
       if(gx%bmperr.ne.0) goto 1000
 ! Magnetic function above Curie/Neel Temperature
-      text='-.0261039233*T**(-7)-8.70130777E-04*T**(-21)'//&
-           '-1.84262988E-04*T**(-35)-6.65916411E-05*T**(-49)'
+      text=' -.0261039233*T**(-7)'//&
+           '-8.70130777E-04*T**(-21)-1.84262988E-04*T**(-35)'//&
+           '-6.65916411E-05*T**(-49)'
       ip=1
       nc=ncc
       call ct1xfn(text,ip,nc,coeff,koder,.FALSE.)
       if(gx%bmperr.ne.0) goto 1000
       call ct1mexpr(nc,coeff,koder,lhigh)
       if(gx%bmperr.ne.0) goto 1000
+! this is 1/(p*D) in eq. A9 in Qing et al for FCC, p=0.25; 1/p-1 =3.0
+!      dval=4.0D0/(0.33461979D0+3.0D0*0.49649686D0)
+!     dval=0.842849633D0
+      dval=one/(0.49649686D0+0.25D0*(0.33461979D0-0.49649686D0))
+!      write(*,*)'3H added Qing-Xiong magnetic contribution to a non-bcc phase'
    endif
 ! reserve an addition record
+!   write(*,*)'3H 1/(pD)= ',dval
    allocate(addrec)
 ! store data in record
    allocate(addrec%explink(2))
+   allocate(addrec%constants(1))
    nullify(addrec%nextadd)
    addrec%type=xiongmagnetic
 ! beware of segmentation fault here !!! llow and llhigh no longer pointers
    addrec%explink(1)=llow
    addrec%explink(2)=lhigh
+   addrec%constants(1)=dval
    addrecs=addrecs+1
+! Set bit 1 that there are properties
+   addrec%status=0
+   addrec%status=ibset(addrec%status,ADDHAVEPAR)
+   if(bcc) addrec%status=ibset(addrec%status,ADDBCCMAG)
+!   write(*,*)'3H Qing-Xiong magnetic addition: ',addrec%status,bcc,ADDBCCMAG
    allocate(addrec%need_property(3))
    addrec%addrecno=addrecs
 ! here the property list is searched for CTA, NTA and IBM
    call need_propertyid('CTA ',typty)
    if(gx%bmperr.ne.0) goto 1000
    addrec%need_property(1)=typty
-   if(btest(phlista(lokph)%status1,PHBMAV)) then
-! This model can use an effective Bohr magneton number b*=prod(b_i+1)**x_i -1
+! The individual Bohr magneton number or not set in PMON
+! WHEN READ FROM A UNFORMATTED FILE, DO WE KNOW LOKPH??
+!   if(btest(phlista(lokph)%status1,PHBMAV)) then
+   if(.not.ibm) then
+! This model use an effective Bohr magneton number b*=prod(b_i+1)**x_i -1
       call need_propertyid('BMAG ',typty)
    else
 ! or an individual Bohr magneton number b*=prod(b_i+1)**x_i -1
+!      write(*,*)'3H using induvidual Bohr magneton numbers',&
+!           btest(phlista(lokph)%status1,PHBMAV)
       call need_propertyid('IBM ',typty)
    endif
+!---------------------------------------------------
    if(gx%bmperr.ne.0) goto 1000
    addrec%need_property(2)=typty
 ! NTA is not so important, anti-magnetic contributions usually small
@@ -805,6 +843,7 @@
    else
       addrec%need_property(3)=typty
    endif
+!   write(*,*)'3H need properties: ',(addrec%need_property(jj),jj=1,3)
 1000 continue
    return
  end subroutine create_xiongmagnetic
@@ -830,13 +869,14 @@
    TYPE(gtp_phase_add), pointer :: lokadd
    TYPE(gtp_equilibrium_data), pointer :: ceq
 !\end{verbatim}
-   integer itc,itn,ibm,jl,noprop,ik,k,jk,j,jxsym
+   integer itc,itn,ibm,jl,noprop,ik,k,jk,j,jxsym,ip
    double precision logb1,invb1,iafftc,iaffbm,rgasm,rt,tao,gmagn,msize
-   double precision dtaodt,dtaodp,beta,d2taodp2,d2taodtdp,tc,tv
+   double precision dtaodt,dtaodp,beta,d2taodp2,d2taodtdp,tc,tv,plus,fixit
    double precision tao2(2),ftao(6),dtao(3,mc),d2tao(mc*(mc+1)/2)
    double precision addgval(6),daddgval(3,mc),d2addgval(mc*(mc+1)/2)
-   double precision tn,tcsave,tnsave
+   double precision tn,tcsave,tnsave,gmdo_inf,dgmdo_infdt,d2gmdo_infdt2
    logical addpermole
+   character line*128,tps(2)*3
    TYPE(tpfun_expression), pointer :: exprot
 ! dgdt = Gmagn/T + RT*df/dtao*dtao/dT*ln(beta+1)
 ! dgdp = RT df/dtao*dtao/dP*ln(beta+1)
@@ -852,7 +892,7 @@
 ! listprop(2:listprop(1)) give the typty of different properties
 ! calculated in gval(*,i) etc
 ! one has to find those with typty equal for need_property in the magnetic
-! record, i.e. typty=2 for TC and typty=3 for BM
+! record, i.e. typty for CTA/NTA and typty for BMAG/IBM
 ! the properties needed.
 !
    noprop=phres%listprop(1)-1
@@ -864,18 +904,20 @@
       if(phres%listprop(jl).eq.lokadd%need_property(1)) then
          itc=jl
       elseif(phres%listprop(jl).eq.lokadd%need_property(2)) then
+! we may also use an "average" Bohr magneton number in BMAG
          ibm=jl
       elseif(phres%listprop(jl).eq.lokadd%need_property(3)) then
          itn=jl
       endif
    enddo findix
 ! check that the needed properties are defined
+!   write(*,*)'3H found magnetic properties: ',itc,ibm,itn
    if(ibm.eq.0 .or. (itc.eq.0 .and. itn.eq.0)) then
 ! it is no error if no CTA, NTA or BMAG but then magnetic contribution is zero
-       write(*,12)trim(phlista(lokph)%name)
-12     format('3H Warning: Magnetic addition for phase ',a,&
-            ' not calculated as '/10x,&
-            'values for CTA, NTA or BMAG, magnetic G are zero')
+       write(*,12)trim(phlista(lokph)%name),itc,itn,ibm
+12     format('3H *** Warning: Magnetic addition for phase ',a,&
+            ' not calculated as '/&
+            10x,'some values for CTA, NTA or BMAG/IBM are zero',3i3)
       goto 1000
    else
       tc=-one
@@ -884,8 +926,8 @@
       if(itn.gt.0) tn=phres%gval(1,itn)
    endif
 ! I am not sure I calculate correct derivatives for indivudal Bohr magnetons ...
-   if(btest(phlista(lokph)%status1,PHBMAV)) then
-      write(*,*)'3H *** Warning: individual Bohjr magneton number not checked'
+   if(.not.btest(phlista(lokph)%status1,PHBMAV)) then
+      write(*,*)'3H *** Bohr magneton number derivatives not calculated'
    endif
    beta=phres%gval(1,ibm)
 !   write(*,95)'3H Magnetic values in: ',itc,itn,ibm,tc,tn,beta
@@ -898,15 +940,19 @@
       d2addgval=zero
       goto 1000
    endif
-! we should use the appropriate tao=t/tc or t/tn
-! use AF model unless tc negative, both cannot be negative here
+! we should use the appropriate tao=t/tc or tao=t/tn
+! BUT WE MAY HAVE BOTH tc>0 and tn>0 !!
+! use AF model unless tc negative, both cannot be negative here (test above)
+! BUT WE MAY HAVE BOTH AS POSITIVE!!
+   tcsave=tc
    if(tc.le.zero) then
-! no ferro but antiferro.  tn>0 as both tn and tc checked against zero above
-      tcsave=tc
+! no ferro but maybe antiferro. One of them must be positive here!!
+! Divide by AFF=3.0?
+!      tc=tn/3.0D0
+!      beta=beta/3.0D0
       tc=tn
 ! we use this index below to extract its value
       itc=itn
-! if tn negative use tc
 !   elseif(tn.gt.zero) then
 ! we have both AFM and FM, use FM, i.e. tc so nothing to do
    endif
@@ -920,44 +966,111 @@
 ! but as tc depend on the constitution that is maybe not so often.
    if(tao.lt.one) then
       exprot=>lokadd%explink(1)
+! VERY CLUMSY bug for debugging
    else
       exprot=>lokadd%explink(2)
    endif
+!   plus=one
+   plus=zero
+! calculate function and derivatives wrt T, functions already created
    call ct1efn(exprot,tao2,ftao,ceq%eq_tpres)
+! copied from list_addition
+!   tps(1)='tao'
+!   tps(2)='err'
+!   ip=1
+!   line=' '
+!   call ct1wfn(exprot,tps,line,ip)
+!   write(*,'(a,a,a/2(1pe12.4))')'f(tao)=',trim(line),';',tao,ftao(1)
+!   write(*,'(a,2(1pe12.4))')'3H tao, f(tao): ',tao,ftao(1)
+!   call wrice(kou,4,8,78,line(1:ip))
+! the functions entered in explink use reference state at T=infinity
+! correct for using reference state at T=0
+! -1.0D0+0.38438376D0*lokadd%constants(1)*T/tc
+! lokadd%constants(1) = 1/(p*D) in eq. A9 in paper by Qing
+! NOTE tc may depend on P, we need the dtaodp and d2taodp2
+   dtaodp=-tao/tc*phres%gval(3,itc)
+   d2taodtdp=-one/tc*phres%gval(3,itc)
+   d2taodp2=2.0d0*tao/tc**2*phres%gval(3,itc)-tao/tc*phres%gval(6,itc)
+!
+   fixit=0.38438376D0*lokadd%constants(1)
+! this is for BCC
+!   fixit=0.880323235D0
+   fixit=zero
+   ftao(1)=ftao(1)+plus*(fixit*tv/tc-one)
+   ftao(2)=ftao(2)+plus*fixit/tc
+   ftao(3)=ftao(3)-plus*fixit*tv*dtaodp/tc**2
+! this is d2ftaodT2, no change
+!   ftao(4)=ftao(4)
+! this is d2ftaodTdP
+   ftao(5)=ftao(5)-plus*fixit*dtaodp/tc**2
+   ftao(6)=ftao(6)+2.0D0*plus*fixit*tv*d2taodp2/tc**3
+!   if(plus.gt.zero) then
+!      write(*,'(a,e17.9,a,e12.4)')'3H f(tao) correction: -1+',&
+!           fixit,'/tao;',beta
+!   else
+!      write(*,'(a,e14.6,a,e14.6)')'3H f(tao) correction: +1-',&
+!           fixit,'/tao;',beta
+!   endif      
+!------------------------------------------------------   
    logb1=log(beta+one)
    invb1=one/(beta+one)
    gmagn=rt*ftao(1)*logb1
+!
+! Calculate Gmdo_inf/RT, which value to use for "p"?
+! THERE ARE T and composition derivatives of this also!!
+!   gmdo_inf=-logb1*(one-0.38438376D0*lokadd%constants(1)/tao)
+!   dgmdo_infdt=-logb1/tv
+!   gmdo_inf=-rt*logb1*(one-0.38438376D0*lokadd%constants(1)/tc)
+!   write(*,'(a,2(1pe14.6),a/5(1pe12.4))')'3H Gmdo(inf): ',&
+!        rgasm*logb1*0.38438376D0*lokadd%constants(1)*tc,rgasm*logb1,'*T',&
+!        rgasm,logb1,0.38438376D0,lokadd%constants(1),tc
+!   gmdo_inf=-rgasm*logb1*(tv-0.38438376D0*lokadd%constants(1)*tc)
+!   dgmdo_infdt=-rgasm*logb1
+!   d2gmdo_infdt2=zero
+!   write(*,88)'3H gmdo_inf: ',tv,gmdo_inf,dgmdo_infdt
+!88 format(a,F8.2,4(1pe12.4))
+!
 !    write(*,98)'3H cm 97: ',tc,beta,ftao(1),logb1,rt
 !    write(*,98)'3H cm 98: ',rt*gmagn,rt*(gmagn+phres%gval(1,1)),tcx,iafftc
 !98  format(a,5(1PE14.6))
 !
    dtaodt=one/tc
-   dtaodp=-tao/tc*phres%gval(3,itc)
+! d2taodT2=zero
+! this already calculated above
+!   dtaodp=-tao/tc*phres%gval(3,itc)
+!   addgval(1)=gmagn+gmdo_inf
+!   addgval(2)=gmagn/tv+rt*ftao(2)*dtaodt*logb1+dgmdo_infdt
+!   addgval(3)=rt*ftao(2)*dtaodp*logb1+rt*ftao(1)*invb1*phres%gval(3,ibm)+&
+!        d2gmdo_infdt2
    addgval(1)=gmagn
    addgval(2)=gmagn/tv+rt*ftao(2)*dtaodt*logb1
    addgval(3)=rt*ftao(2)*dtaodp*logb1+rt*ftao(1)*invb1*phres%gval(3,ibm)
+! make sure d2G/dT2 is calculated and stored so it can be listed
+   addgval(4)=(2.0D0*ftao(2)+tv*ftao(4)*dtaodt)*rgasm*dtaodt*logb1
 !   phres%gval(1,1)=phres%gval(1,1)+addgval(1)/rt
 !   phres%gval(2,1)=phres%gval(2,1)+addgval(2)/rt
 !   phres%gval(3,1)=phres%gval(3,1)+addgval(3)/rt
 ! save these in record
 ! NOTE if parallel calculation the same stored values %propval will be
 ! written by all threads so they must not be used!!
-! They are included only for listing and debugging
-   do j=1,3
-      lokadd%propval(j)=addgval(j)
-      phres%gval(j,1)=phres%gval(j,1)+addgval(j)/rt
-   enddo
 !   write(*,77)lokadd%type,(lokadd%propval(j),j=1,4)
-77 format('3H addition ',i2,': ',4(1pe12.4))
-! ignore second derivatives if no derivatives wanted
+!77 format('3H addition ',i2,': ',4(1pe12.4))
+!   if(moded.eq.0) then
    if(moded.eq.0) then
-! make sure Cp is calculated and stored so it can be listed
-      addgval(4)=2.0d0*rgasm*ftao(2)*dtaodt*logb1+&
-           rt*ftao(4)*(dtaodt)**2*logb1
-      lokadd%propval(4)=addgval(4)
+! They are included only for listing and debugging
+      if(btest(lokadd%status,ADDPERMOL)) then
+         addpermole=.TRUE.; msize=phres%abnorm(1)
+      else
+         msize=one
+      endif
+      do j=1,4
+         lokadd%propval(j)=msize*addgval(j)
+         phres%gval(j,1)=phres%gval(j,1)+msize*addgval(j)/rt
+      enddo
+! ignore second derivatives if no derivatives wanted
       goto 1000
    endif
-! Now all derivatives
+! Now all derivatives with respect to fractions ...
 ! phres%gval(*,itc) are TC and derivatives wrt T and P
 ! phres%dgval(*,*,itc) are derivatives of TC wrt T, P and Y
 ! phres%d2gval(*,itc) are derivatives of TC wrt Y1 and Y2
@@ -966,11 +1079,11 @@
 !    dtaodt=one/tc
 !    dtaodp=-tao/tc*phres%gval(3,itc)
 ! d2taodt2 is zero
-   d2taodtdp=-one/tc*phres%gval(3,itc)
-   d2taodp2=2.0d0*tao/tc**2*phres%gval(3,itc)-tao/tc*phres%gval(6,itc)
+!   d2taodtdp=-one/tc*phres%gval(3,itc)
+!   d2taodp2=2.0d0*tao/tc**2*phres%gval(3,itc)-tao/tc*phres%gval(6,itc)
 ! 1-6 means F, F.T, T.P, F.T.T, F.T.P and F.P.P
-   addgval(4)=2.0d0*rgasm*ftao(2)*dtaodt*logb1+&
-        rt*ftao(4)*(dtaodt)**2*logb1
+!   addgval(4)=2.0d0*rgasm*ftao(2)*dtaodt*logb1+&
+!        rt*ftao(4)*(dtaodt)**2*logb1
    addgval(5)=rgasm*ftao(2)*dtaodp*logb1+&
         rgasm*ftao(1)*invb1*phres%gval(3,ibm)+&
         rt*ftao(4)*dtaodt*dtaodp*logb1+&
@@ -1050,7 +1163,7 @@
 ! the size of the phase ...
    if(btest(lokadd%status,ADDPERMOL)) then
       addpermole=.TRUE.; msize=phres%abnorm(1)
-      write(*,'(a,i4,l2,1pe12.4)')'3H msize magadd 2: ',lokph,addpermole,msize
+!      write(*,'(a,i4,l2,1pe12.4)')'3H msize magadd 2: ',lokph,addpermole,msize
    else
       addpermole=.FALSE.; msize=one
    endif
@@ -1071,15 +1184,18 @@
       enddo
    enddo
 !    write(*,*)'3H cm 7: ',rt*phres%gval(1,1),addgval(1)
-! note phres%gval(1..3,1) already calculated above
-   do j=4,6
+! note phres%gval(1..3,1) already calculated above, multiplied with misize??
+   do j=1,6
       lokadd%propval(j)=msize*addgval(j)
       phres%gval(j,1)=phres%gval(j,1)+msize*addgval(j)/rt
    enddo
 ! we may have destroyed the original value of tc if we have AFM
    tc=tcsave
+!   write(*,900)tc,tn,tao,beta,phres%gval(4,1),lokadd%propval(4)
+900 format('3H QX magn1: ',2F9.2,2F9.3,2(1pe12.4))
 ! jump here if no magnetic contribution
 1000 continue
+!   write(*,900)tc,tn,tao,beta,phres%gval(1,1),lokadd%propval(1)
    return
  end subroutine calc_xiongmagnetic
 
@@ -1101,6 +1217,7 @@
    allocate(addrec)
 ! store data in record
    nullify(addrec%nextadd)
+   addrec%status=0
    addrec%type=volmod1
 ! addrecs declared in gtp3.F90 but I am not sure it is needed or used
    addrecs=addrecs+1
@@ -1223,6 +1340,7 @@
    allocate(newadd)
    newadd%type=elasticmodel1
    allocate(newadd%need_property(5))
+   newadd%status=0
 ! needed properties
    newadd%need_property=0
    call need_propertyid('LPX ',typty)
@@ -1418,7 +1536,9 @@
    allocate(newadd)
 ! Both Einstein and Debye models use THET
    newadd%type=einsteincp
-   call need_propertyid('THET',typty)
+   newadd%status=0
+!   call need_propertyid('THET',typty)
+   call need_propertyid('LNTH',typty)
    if(gx%bmperr.ne.0) goto 1000
    allocate(newadd%need_property(1))
    newadd%need_property(1)=typty
@@ -1449,23 +1569,26 @@
    type(gtp_phase_add), pointer :: addrec
    type(gtp_equilibrium_data), pointer :: ceq
 !\end{verbatim}
-   integer ith,noprop,extreme,j1
+   integer ith,noprop,extreme,j1,j2
    double precision kvot,expkvot,expmkvot,ln1mexpkvot,kvotexpkvotm1,fact
 !   double precision del1,del2,del3,del4,gein,dgeindt,d2geindt2,theta
    double precision gein,dgeindt,d2geindt2,msize,theta,test
    double precision addphm(6)
    logical addpermole
+   double precision, allocatable :: dthet(:),d2thet(:),dein(:),d2ein(:)
 !
    noprop=phres%listprop(1)-1
 !   write(*,*)'3H thet: ',phres%listprop(2),addrec%need_property(1)
    findix: do ith=2,noprop
       if(phres%listprop(ith).eq.addrec%need_property(1)) goto 100
    enddo findix
-   write(*,*)'3H No value of THET for phase ',trim(phlista(lokph)%name)
+!   write(*,*)'3H No value of THET for phase ',trim(phlista(lokph)%name)
+   write(*,*)'3H No value of LNTH for phase ',trim(phlista(lokph)%name)
    gx%bmperr=4336; goto 1000
 100 continue
    if(phres%gval(1,ith).le.one) then
-      write(*,69)'3H Illegal THET for phase ',trim(phlista(lokph)%name),&
+!      write(*,69)'3H Illegal THET for phase ',trim(phlista(lokph)%name),&
+      write(*,69)'3H Illegal LNTH for phase ',trim(phlista(lokph)%name),&
            phres%gval(1,ith)
 69    format(a,a,1pe12.4)
       gx%bmperr=4399; goto 1000
@@ -1476,13 +1599,48 @@
 ! NOTE ALL VALUES CALCULATED AS FOR G/RT
 ! kvot=theta/T
    if(phres%gval(1,ith).gt.1.0D2) then
-      write(*,*)'3H Probably wrong value of THET, parameter should be ln(THET)'
+!      write(*,*)'3H Probably wrong value of THET, parameter should be ln(THET)'
+      write(*,*)'3H Probably wrong value of LNTH, parameter should be ln(THET)'
       write(*,*)'3H error in phase: ',trim(phlista(lokph)%name)
       gx%bmperr=4399; goto 1000
    endif
 ! The exp( ) because the parameter value is LN(THETA)   
    theta=exp(phres%gval(1,ith))
-   kvot=exp(phres%gval(1,ith))/ceq%tpval(1)
+!   kvot=exp(phres%gval(1,ith))/ceq%tpval(1)
+   kvot=theta/ceq%tpval(1)
+!   write(*,*)'3H LN(THET): ',trim(phlista(lokph)%name),phres%gval(1,ith),theta
+!   write(*,'(a,4(1pe11.3))')'3H dTH/dyi: ',(phres%dgval(1,j1,ith),j1=1,mc)
+!   write(*,'(a,4(2i2,1pe11.3))')'3H d2TH/dyidyj: ',&
+!        ((j1,j2,phres%d2gval(ixsym(j1,j2),ith),j2=j1,mc),j1=1,mc)
+! We must convert all derivatives to real THET ?? no ??
+   allocate(dthet(mc))
+   allocate(d2thet(mc*(mc+1)/2))
+   do j1=1,mc
+      do j2=j1,mc
+         d2thet(ixsym(j1,j2))=phres%d2gval(ixsym(j1,j2),ith)
+      enddo
+      dthet(j1)=phres%dgval(1,j1,ith)
+   enddo
+!   do j1=1,mc
+!      do j2=j1,mc
+!         d2thet(ixsym(j1,j2))=exp(phres%d2gval(ixsym(j1,j2),ith))
+!      enddo
+!      dthet(j1)=exp(phres%dgval(1,j1,ith))
+!   enddo
+!   write(*,'(a,4(1pe11.3))')'3H A dTH/dyi: ',(dthet(j1),j1=1,mc)
+!   write(*,'(a,4(2i2,1pe11.3))')'3H A d2TH/dyidyj: ',&
+!        ((j1,j2,d2thet(ixsym(j1,j2)),j2=j1,mc),j1=1,mc)
+! simpler .... if it is correct??  
+!  dTHETA/dy_i = d/dyi(exp(LNTH))= exp(LNTH)*d/dy1(LNTH) = THETA*dLNTH/dy1 ??
+!   do j1=1,mc
+!      do j2=j1,mc
+!         d2thet(ixsym(j1,j2))=theta*phres%d2gval(ixsym(j1,j2),ith)
+!      enddo
+!      dthet(j1)=theta*phres%dgval(1,j1,ith)
+!   enddo
+!   write(*,'(a,4(1pe11.3))')'3H B dTH/dyi: ',(dthet(j1),j1=1,mc)
+!   write(*,'(a,4(2i2,1pe11.3))')'3H B d2TH/dyidyj: ',&
+!        ((j1,j2,d2thet(ixsym(j1,j2)),j2=j1,mc),j1=1,mc)
 !   write(*,70)'3H phres: ',ceq%tpval(1),phres%gval(1,1),phres%gval(2,1),&
 !        phres%gval(3,1),phres%gval(4,1),kvot
 ! we should be careful with numeric overflow, for small T or large T
@@ -1566,17 +1724,37 @@
 !   write(*,77)'3H Einstein dE/dy',lokph,1,theta,phres%dgval(1,1,ith),fact,&
 !        phres%dgval(1,1,1),phres%dgval(1,1,1)+fact*phres%dgval(1,1,ith)
 77 format(a,2i2,5(1pe12.4))
+!   allocate(dein(mc))
+!   allocate(d2ein(mc*(mc+1)/2))
+! VERY MESSY CODING AND I DO NOT UNDERSTAND IT/BoS 2021.04.02
    do j1=1,mc
 !     write(*,77)'3H Einstein dE/dy',lokph,j1,theta,phres%dgval(1,j1,ith),fact,&
 !           phres%dgval(1,j1,1),phres%dgval(1,j1,1)+fact*phres%dgval(1,j1,ith)
-      phres%dgval(1,j1,1)=msize*(phres%dgval(1,j1,1)+fact*phres%dgval(1,j1,ith))
-!      test=test+fact*phres%dgval(1,j1,ith)
+! we must use dthet(j1)=THETA*dgval(1,j1,ith) and not dgval(1,j1,ith) !!
+! old phres%dgval(1,j1,1)=msize*(phres%dgval(1,j1,1)+fact*phres%dgval(1,j1,ith))
+      phres%dgval(1,j1,1)=phres%dgval(1,j1,1)+msize*fact*dthet(j1)
+!      write(*,*)'3H second derivatives missing for Einstein, SUCK'
+!      dein(j1)=msize*fact*dthet(j1)
+      do j2=j1,mc
+! d2Ein/dy1dy2 = (1.5R*theta+3*R*(exp(kvot)-1)**(-1))*d2theta/dy1dy2 -
+!                 3*R*exp(kvot)/(T*(exp(kvot)-1))**2*dtheta/dy1*dtheta/dy2
+         phres%d2gval(ixsym(j1,j2),1)=phres%d2gval(ixsym(j1,j2),1)+&
+              msize*(fact*d2thet(ixsym(j1,j2))-&
+              3.0d0*exp(kvot)*(ceq%tpval(1)*(exp(kvot)-one))**(-2)*&
+              dthet(j1)*dthet(j2))
+!         d2ein(ixsym(j1,j2))=msize*(fact*d2thet(ixsym(j1,j2))-&
+!              3.0d0*exp(kvot)*(ceq%tpval(1)*(exp(kvot)-one))**(-2)*&
+!              dthet(j1)*dthet(j2))
+      enddo
    enddo
-! This seems a small efect, ignore second derivatives ...
+! listing ....
+!   write(*,'(a,4(1pe11.3))')'3H dein: ',(dein(j1),j1=1,mc)
+!   write(*,'(a,4(2i2,1pe11.3))')'3H d2ein: ',&
+!        ((j1,j2,d2ein(ixsym(j1,j2)),j2=j1,mc),j1=1,mc)
 !
 ! END NEW CODE ----------------------------------------------------------
 ! debug value of G
-!   write(*,77)'3H Einstein theta',lokph,0,theta,gein,test,msize
+!   write(*,77)'3H Einstein ln(theta):',lokph,0,theta,gein,test,msize
 ! return the values in phres%gval(*,1)
    phres%gval(1,1)=phres%gval(1,1)+msize*gein
    phres%gval(2,1)=phres%gval(2,1)+msize*dgeindt
@@ -1599,6 +1777,7 @@
    addphm(1)=gein
    addphm(2)=dgeindt
    addphm(4)=d2geindt2
+! correct for formula unit
    call add_size_derivatives(moded,phres,addphm,lokph,mc,ceq)
 !
 1000 continue
@@ -1704,6 +1883,7 @@
 !------------------------------------------
    allocate(newadd)
 ! Schottky anomaly uses THT2 and DCP2, same as second Einstein
+   newadd%status=0
    newadd%type=schottkyanomaly
    allocate(newadd%need_property(2))
    call need_propertyid('TSCH',typty)
@@ -1746,7 +1926,7 @@
    logical addpermole
 !
    noprop=phres%listprop(1)-1
-!   write(*,*)'3H thet: ',phres%listprop(2),addrec%need_property(1)
+!   write(*,*)'3H lnth: ',phres%listprop(2),addrec%need_property(1)
    ith=0
    jth=0
    findix: do j1=2,noprop
@@ -1869,6 +2049,7 @@
 !------------------------------------------
    allocate(newadd)
    newadd%type=secondeinstein
+   newadd%status=0
 ! The second Einstein use THT2 and DCP2
    allocate(newadd%need_property(2))
    call need_propertyid('THT2',typty)
@@ -1929,7 +2110,7 @@
    endif
 100 continue
    if(phres%gval(1,ith).le.one) then
-      write(*,70)'3H Illegal THET for phase ',trim(phlista(lokph)%name),&
+      write(*,70)'3H Illegal LNTH for phase ',trim(phlista(lokph)%name),&
            phres%gval(1,ith)
       gx%bmperr=4399; goto 1000
    endif
@@ -2034,6 +2215,7 @@
 ! this is bad programming as it cannot be deallocated but it will never be ...
 ! maybe pointers can be deallocated?
    allocate(addrec)
+   addrec%status=0
 ! nullify pointer to next addition
    nullify(addrec%nextadd)
 !-----------------------------
@@ -2050,7 +2232,8 @@
    allocate(addrec%need_property(2))
    call need_propertyid('G2  ',typty)
    addrec%need_property(1)=typty
-   call need_propertyid('THETA  ',typty)
+!   call need_propertyid('THET ',typty)
+   call need_propertyid('LNTH  ',typty)
    addrec%need_property(2)=typty
 ! type of addition
    addrec%type=twostatemodel1
@@ -2076,6 +2259,7 @@
    allocate(addrec)
 ! nullify pointer to next addition
    nullify(addrec%nextadd)
+   addrec%status=0
 !-----------------------------
 ! The model consists of two contributions
 ! The first is the harmonic vibrations of an ideal amprthous phase
@@ -2090,7 +2274,8 @@
    allocate(addrec%need_property(1))
 !   call need_propertyid('G2  ',typty)
 !   addrec%need_property(1)=typty
-   call need_propertyid('THETA  ',typty)
+!   call need_propertyid('THETA  ',typty)
+   call need_propertyid('LNTH ',typty)
    addrec%need_property(1)=typty
 ! type of addition  this is 12
    addrec%type=twostatemodel2
@@ -2180,7 +2365,7 @@
    enddo findix
    if(ith.eq.0) then
 !      write(*,*)'3H Cannot find value for amorphous THET'
-      write(*,*)'3H warning no values for amorphous THET'
+      write(*,*)'3H warning no values for amorphous LNTH'
       gein=zero; dgeindt=zero; d2geindt2=zero
       goto 300
 !      gx%bmperr=4367; goto 1000
@@ -2361,7 +2546,7 @@
 !\addtotable subroutine calc_twostate_model1
 !\begin{verbatim}
  subroutine calc_twostate_model1(moded,phres,addrec,lokph,mc,ceq)
-! this routine is used when G2 and THETA are composition dependent
+! this routine is used when G2 and LNTH are composition dependent
 ! subroutine calc_twostate_modelny(moded,phres,addrec,lokph,mc,ceq)
 ! The routine _john works OK but I am testing a modification
 ! moded is 0, 1 or 2 if no, first or 2nd order derivatives should be calculated
@@ -2418,7 +2603,7 @@
 ! current values of G2 is stored in phres%gval(1,ig2)
          ig2=jj;
       elseif(phres%listprop(jj).eq.addrec%need_property(2)) then
-! current value of THET are stored in phres%gval(1,ith)
+! current value of LNTH are stored in phres%gval(1,ith)
          ith=jj
 !      elseif(phres%listprop(jj).eq.22) then
 ! current value of DCP2 are stored in phres%gval(1,ith)
@@ -2426,10 +2611,10 @@
       endif
    enddo findix
    if(ith.eq.0) then
-!      write(*,*)'3H Cannot find value for amorphous THET'
+!      write(*,*)'3H Cannot find value for amorphous LNTH'
       if(maxwarnings.lt.20) then
          maxwarnings=maxwarnings+1
-         write(*,*)'3H twostatemodel1 no values for amorphous THET:',maxwarnings
+         write(*,*)'3H twostatemodel1 no values for amorphous LNTH:',maxwarnings
       endif
       gein=zero; dgeindt=zero; d2geindt2=zero
       goto 300
@@ -2493,13 +2678,13 @@
    else
       d2geindt2=-3.0D0*kvotexpkvotm1**2/(expmkvot*ceq%tpval(1)**2)
    endif
-! composition variable Variable THETA
+! composition variable Variable LNTH
    fact=1.5D0*(one+expmkvot)/(one-expmkvot)*kvot
 ! the curve below better, correct shape ...
    do jj=1,mc
       phres%dgval(1,jj,1)=msize*(phres%dgval(1,jj,1)+fact*phres%dgval(1,jj,ith))
    enddo
-!-------------------------- jump here if no THET variable
+!-------------------------- jump here if no LNTH variable
 ! return the values in phres%gval(*,1)
 300 continue
    phres%gval(1,1)=phres%gval(1,1)+msize*gein
@@ -2711,7 +2896,7 @@
 !
 1000 continue
    return
-! this routine is used when G2 and THETA are composition dependent
+! this routine is used when G2 and LNTH are composition dependent
  end subroutine calc_twostate_model1
 
 !/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\!/!\
@@ -2725,7 +2910,7 @@
 !
 ! IN THIS VERSION G2 is treated as a composition independent parameter 
 !  thus this just handles the Einsten Cp
-! NOTE Einstein THET should be composition dependent
+! NOTE Einstein LNTH should be composition dependent
 !
 ! phres is phase_varres record
 ! lokph is phase location
@@ -2782,10 +2967,10 @@
       endif
    enddo findix
    if(ith.eq.0) then
-!      write(*,*)'3H Cannot find value for amorphous THET'
+!      write(*,*)'3H Cannot find value for amorphous LNTH'
       if(maxwarnings.lt.20) then
          maxwarnings=maxwarnings+1
-         write(*,*)'3H twostatemodel2 no values for amorphous THET:',maxwarnings
+         write(*,*)'3H twostatemodel2 no values for amorphous LNTH:',maxwarnings
       endif
       gein=zero; dgeindt=zero; d2geindt2=zero
       goto 1000
@@ -2806,7 +2991,7 @@
 ! G/RT = 1.5*THET/T + 3*R*LN(exp(THET/T) - 1) 
 ! NOTE ALL VALUES CALCULATED AS FOR G/RT
 ! kvot=theta/T
-! NOTE the stored value is ln(theta! !!!
+! NOTE the stored value is ln(theta)! !!!
    kvot=exp(phres%gval(1,ith))/ceq%tpval(1)
 !   write(*,70)'3H phres: ',ceq%tpval(1),phres%gval(1,1),phres%gval(2,1),&
 !        phres%gval(3,1),phres%gval(4,1),kvot
@@ -3036,7 +3221,7 @@
    double precision hump,fq,dfq,d2fq,addq,daddq,d2addq,dd
 ! number of properties calculatied
    noprop=phres%listprop(1)-1
-! locate the THET and G2 property record 
+! locate the LNTH and G2 property record 
    ig2=0
    ith=0
    findix: do jj=2,noprop
@@ -3049,7 +3234,7 @@
       endif
    enddo findix
    if(ith.eq.0) then
-      write(*,*)'Cannot find value for amorphous THET'
+      write(*,*)'Cannot find value for amorphous LNTH'
       gx%bmperr=4399; goto 1000
    endif
    if(ig2.eq.0) then
@@ -3223,8 +3408,9 @@
    allocate(addrec)
 ! Set the type of addition and look for needed parameter properties
    addrec%type=debyecp
+   addrec%status=0
    allocate(addrec%need_property(1))
-   call need_propertyid('THET',typty)
+   call need_propertyid('LNTH ',typty)
    if(gx%bmperr.ne.0) goto 1000
    addrec%need_property(1)=typty
 ! missing things for the actual Cp function ...
@@ -3262,7 +3448,7 @@
    do ith=2,noprop
       if(phres%listprop(ith).eq.lokadd%need_property(1)) goto 100
    enddo
-   write(*,*)'3H No Debye temperature THET',lokph
+   write(*,*)'3H No Debye temperature LNTH',lokph
    gx%bmperr=4336; goto 1000
 100 continue
    write(*,*)'3H Deby low T heat capacity model not implemented'
@@ -3292,13 +3478,14 @@
    allocate(addrec)
 ! nullify pointer to next addition
    nullify(addrec%nextadd)
+   addrec%status=0
 ! Set the type of addition and look for needed parameter properties
    addrec%type=diffcoefs
 ! Some information is needed
    last=1
 100 continue
    call gparcdx('Type of diffusion model: ',text,last,1,typ,'SIMPLE',&
-        '?AMEND diffusion')
+        '?Amend diffusion')
    call capson(typ)
 !   write(*,*)'3H typ: ',index('MAGNETIC',trim(typ)),trim(typ)
    if(index('SIMPLE',trim(typ)).eq.1) then
@@ -3329,7 +3516,7 @@
 200   continue
       loksp=phlista(lokph)%constitlist(is)
       spname=splista(loksp)%symbol
-      call gparcdx(quest,text,last,1,typ,spname,'?AMEND diffusion')
+      call gparcdx(quest,text,last,1,typ,spname,'?Amend diffusion')
       call find_species_record(typ,loksp2)
       if(gx%bmperr.ne.0) then
          if(once) then
@@ -3356,7 +3543,7 @@
 ! for jj=3 we must ask for ALPHA and ALPHA2 (with species names)
    if(jj.eq.3) then
       allocate(diffcoef%alpha(phlista(lokph)%nooffr(2)))
-      call gparrdx('Value of ALPHA: ',text,last,alpha,0.3D0,'?AMEND diffusion')
+      call gparrdx('Value of ALPHA: ',text,last,alpha,0.3D0,'?Amend diffusion')
       diffcoef%alpha(1)=alpha
       if(nsl.eq.2 .and. phlista(lokph)%nooffr(2).gt.1) then
          ks=2
@@ -3367,7 +3554,7 @@
             if(.not.btest(splista(loksp)%status,SPVA)) then
                spname=splista(loksp)%symbol
                quest='Value of ALPHA2&'//trim(spname)
-               call gparrdx(quest,text,last,alpha,1.0D0,'?AMEND diffusion')
+               call gparrdx(quest,text,last,alpha,1.0D0,'?Amend diffusion')
                if(ks.le.size(diffcoef%alpha)) diffcoef%alpha(ks)=alpha
                ks=ks+1
             endif
@@ -3545,8 +3732,8 @@
 200   format(a,'+ Debye Cp model, not implemented yet')
 !---------------------------------------------
    case(xiongmagnetic) ! Inden-Qing-Xiong
-      write(unit,300)chc
-300   format(a,'+ Inden magnetic model modified by Qing and Xiong'/&
+      write(unit,300)chc,lokadd%status
+300   format(a,'+ Inden magnetic model modified by Qing and Xiong ',Z8/&
            4x,'with separate Curie and Neel temperatures.'/&
            4x,'Magnetic function below the ordering temperature TC ',&
            ' with TAO=T/TC:')
@@ -3566,19 +3753,19 @@
 !---------------------------------------------
    case(einsteincp) ! Einstein Cp model
       write(unit,400)chc
-400   format(a,'+ Einstein Cp model: 1.5R*exp(THET(x)) +',&
-           ' 3RT*ln(1-exp(-exp(THET(x))/T))')
+400   format(a,'+ Einstein Cp model: 1.5R*exp(LNTH(x)) +',&
+           ' 3RT*ln(1-exp(-exp(LNTH(x))/T))')
 !---------------------------------------------
    case(elasticmodel1) ! Elastic model 1
       write(unit,500)
-500   format(2x,'+ Elastic model 1, with P interpreted as a force in',&
+500   format(1x,'+ Elastic model 1, with P interpreted as a force in',&
            ' the X direction.')
 !---------------------------------------------
    case(twostatemodel1) ! Liquid two state  model including Einstein
       write(unit,510)chc,chc
-510   format(a,' + Liquid 2 state model: G(liq)-RT*ln(1+exp(-G2(x,T)/RT))'/&
-           a,' + Einstein Cp model: 1.5R*exp(THET(x)) ',&
-           '+ 3RT*ln(1-exp(-exp(THET(x))/T))')
+510   format(a,'+ Liquid 2 state model: G(liq)-RT*ln(1+exp(-G2(x,T)/RT))'/&
+           a,'+ Einstein Cp model: 1.5R*exp(LNTH(x)) ',&
+           '+ 3RT*ln(1-exp(-exp(LNTH(x))/T))')
 !---------------------------------------------
    case(volmod1) ! Volume model 1
       write(unit,520)chc
@@ -3596,11 +3783,12 @@
       write(unit,550)chc
 550   format(a,'+ Schottky anomaly DSCH(x)*RT*ln(1+exp(-ln(TSCH(x))/T)) ')
 !---------------------------------------------
+! THIS MODEL IS OBSOLETE
    case(twostatemodel2) ! Liquid two state  model with fix G2 and Einstein
       write(unit,511)chc,chc
-511   format(a,' + Liquid 2 state model: G(liq)-RT*ln(1+exp(-G2(T)/RT))'/&
-           a,' + Einstein Cp model: 1.5R*exp(THET(x)) ',&
-           '+ 3RT*ln(1-exp(exp(THET(x))/T))')
+511   format(a,' + wrong Liquid 2 state model: G(liq)-RT*ln(1+exp(-G2(T)/RT))'/&
+           a,' + Einstein Cp model: 1.5R*exp(LNTH(x)) ',&
+           '+ 3RT*ln(1-exp(exp(LNTH(x))/T))')
 !---------------------------------------------
    end select addition
 1000 continue
